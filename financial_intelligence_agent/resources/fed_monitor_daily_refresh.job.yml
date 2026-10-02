@@ -1,0 +1,72 @@
+resources:
+  jobs:
+    fed_monitor_daily_refresh:
+      name: Fed Monitor Daily Refresh
+      tasks:
+        - task_key: land_fred_raw
+          disabled: false
+          email_notifications:
+            on_failure:
+              - scott.banducci@gmail.com
+          notebook_task:
+            notebook_path: ../src/fredapi.ipynb
+            source: WORKSPACE
+          notification_settings:
+            alert_on_last_attempt: false
+            no_alert_for_canceled_runs: false
+            no_alert_for_skipped_runs: false
+          run_if: ALL_SUCCESS
+          timeout_seconds: 0
+          webhook_notifications: {}
+        - task_key: pipe_fred_to_gold
+          depends_on:
+            - task_key: land_fred_raw
+          disabled: false
+          email_notifications: {}
+          pipeline_task:
+            pipeline_id: ebfeb17a-0e41-4e60-b58a-18133849950d
+          run_if: ALL_SUCCESS
+          timeout_seconds: 0
+          webhook_notifications: {}
+        - task_key: thursday_brief
+          depends_on:
+            - task_key: pipe_fred_to_gold
+          condition_task:
+            left: '{{job.start_time.iso_weekday}}'
+            op: EQUAL_TO
+            right: "5"
+          disabled: false
+          email_notifications: {}
+          run_if: ALL_SUCCESS
+          timeout_seconds: 0
+          webhook_notifications: {}
+        - task_key: weekly_briefing
+          depends_on:
+            - outcome: "true"
+              task_key: thursday_brief
+          disabled: false
+          email_notifications: {}
+          notebook_task:
+            notebook_path: ../src/weekly_briefing.ipynb
+            source: WORKSPACE
+          run_if: ALL_SUCCESS
+          timeout_seconds: 0
+          webhook_notifications: {}
+      description: Lands json data > flows bronze > silver > gold > IF thursday, weekly briefing
+      email_notifications:
+        no_alert_for_skipped_runs: false
+        on_failure:
+          - scott.banducci@gmail.com
+      max_concurrent_runs: 1
+      notification_settings:
+        no_alert_for_canceled_runs: false
+        no_alert_for_skipped_runs: false
+      performance_target: PERFORMANCE_OPTIMIZED
+      queue:
+        enabled: true
+      schedule:
+        pause_status: UNPAUSED
+        quartz_cron_expression: 0 30 18 ? * MON-FRI
+        timezone_id: America/New_York
+      timeout_seconds: 0
+      webhook_notifications: {}

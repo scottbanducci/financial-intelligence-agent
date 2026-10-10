@@ -1,0 +1,10 @@
+resources:
+  jobs:
+    smoke_test:
+      name: financial_intelligence_agent_smoke_test
+      tasks:
+        - task_key: check_execution
+          notebook_task:
+            notebook_path: ../src/smoke_test.py
+            base_parameters:
+              bundle_target: ${bundle.target}

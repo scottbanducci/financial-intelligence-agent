@@ -25,8 +25,13 @@ targets:
     workspace:
       host: https://dbc-cc985d61-8194.cloud.databricks.com
     variables:
-      catalog: fed_monitor
+      catalog: fed_monitor_dev
       schema: ${workspace.current_user.short_name}
+    resources:
+      jobs:
+        fed_monitor_daily_refresh:
+          schedule:
+            pause_status: PAUSED
   prod:
     mode: production
     workspace:

@@ -1,0 +1,19 @@
+resources:
+  pipelines:
+    fred_pipeline:
+      name: Fred Pipeline
+      catalog: ${var.catalog}
+      schema: bronze
+      serverless: true
+      continuous: false
+      photon: true
+      channel: CURRENT
+
+      configuration:
+        app.catalog: ${var.catalog}
+
+      libraries:
+        - notebook:
+            path: ../src/fredpipe.ipynb
+        - notebook:
+            path: ../src/fredpipe_gold.ipynb

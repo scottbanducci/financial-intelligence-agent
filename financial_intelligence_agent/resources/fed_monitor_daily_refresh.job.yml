@@ -11,6 +11,8 @@ resources:
           notebook_task:
             notebook_path: ../src/fredapi.ipynb
             source: WORKSPACE
+            base_parameters:
+              catalog: ${var.catalog}
           notification_settings:
             alert_on_last_attempt: false
             no_alert_for_canceled_runs: false
@@ -24,7 +26,7 @@ resources:
           disabled: false
           email_notifications: {}
           pipeline_task:
-            pipeline_id: ebfeb17a-0e41-4e60-b58a-18133849950d
+            pipeline_id: ${resources.pipelines.fred_pipeline.id}
           run_if: ALL_SUCCESS
           timeout_seconds: 0
           webhook_notifications: {}
@@ -49,6 +51,8 @@ resources:
           notebook_task:
             notebook_path: ../src/weekly_briefing.ipynb
             source: WORKSPACE
+            base_parameters:
+              catalog: ${var.catalog}
           run_if: ALL_SUCCESS
           timeout_seconds: 0
           webhook_notifications: {}

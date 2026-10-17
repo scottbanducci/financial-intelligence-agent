@@ -14,6 +14,25 @@ class Operators(unittest.TestCase):
     def test_registry_breadth(self):
         self.assertGreaterEqual(len(OPERATOR_SPECS),45)
         self.assertEqual(sum(x.arity==2 for x in OPERATOR_SPECS.values()),11)
+    def test_dimensioned_arithmetic_and_annualized_volatility(self):
+        base=source("a",[100,102,101,105,107],unit="USD")
+        value=source("b",[4,5,5,6,7],unit="percent")
+        self.assertEqual(execute("square",base).unit,"(USD)^2")
+        self.assertEqual(execute("square_root",base).unit,"sqrt(USD)")
+        self.assertEqual(execute("reciprocal",base).unit,"1/(USD)")
+        self.assertEqual(execute("divide",base,value).unit,"USD/percent")
+        self.assertEqual(execute("rolling_percentile_rank",base,window=3).unit,"percent")
+        self.assertEqual(execute("annualized_volatility",base,window=4).unit,"percent")
+        self.assertIsNone(execute("annualized_volatility",base,window=2).points[-1].value)
+        with self.assertRaisesRegex(ValueError,"units"):
+            execute("ratio",base,value)
+        weekly=Series("weekly","FRED","USD","weekly",tuple(
+            Point(date(2025,1,1)+__import__("datetime").timedelta(days=7*i),100+i%5)
+            for i in range(12)))
+        default=execute("annualized_volatility",weekly,window=5)
+        overridden=execute("annualized_volatility",weekly,window=5,periods_per_year=252)
+        self.assertTrue(default.points[-1].value<overridden.points[-1].value)
+
     def test_unit_and_mixed_frequency_validation(self):
         a,b=source("a",[1,2,3]),source("b",[2,2,2],"USD")
         with self.assertRaisesRegex(ValueError,"units"):

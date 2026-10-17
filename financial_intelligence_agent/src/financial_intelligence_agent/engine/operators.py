@@ -169,12 +169,13 @@ OPERATOR_SPECS = {
 SAME_UNITS = {"add", "subtract", "spread_basis_points", "percent_difference", "relative_strength"}
 DIMENSIONLESS = {
     "sign", "natural_log", "log10", "percent_change", "log_return", "year_over_year_percent",
-    "drawdown_percent", "rolling_zscore", "rolling_percentile_rank", "rolling_percent_change",
-    "annualized_volatility", "rolling_compound_return", "rolling_correlation",
-    "rolling_beta", "ratio", "divide", "percent_difference", "relative_strength",
+    "drawdown_percent", "rolling_zscore", "rolling_percent_change",
+    "rolling_compound_return", "rolling_correlation",
+    "ratio", "percent_difference", "relative_strength",
 }
 PERCENT_UNITS = {"percent_change", "year_over_year_percent", "drawdown_percent",
-                 "rolling_percent_change", "percent_difference", "rolling_compound_return"}
+                 "rolling_percent_change", "percent_difference", "rolling_compound_return",
+                 "annualized_volatility", "rolling_percentile_rank"}
 
 
 def _window(values: list[Decimal | None], i: int, window: int) -> list[Decimal] | None:
@@ -202,7 +203,7 @@ def _series_result(name: str, sources: tuple[Series, ...], points: list[Point], 
     )
 
 
-def execute(name: str, *sources: Series, window: int = 5, periods_per_year: int = 252,
+def execute(name: str, *sources: Series, window: int = 5, periods_per_year: int | None = None,
             as_of: date | str | None = None) -> Series:
     """Execute a typed, allowlisted operation with exact-date alignment.
 
@@ -217,13 +218,18 @@ def execute(name: str, *sources: Series, window: int = 5, periods_per_year: int 
         raise ValueError("Wrong operator arity")
     if type(window) is not int or not 2 <= window <= MAX_WINDOW:
         raise ValueError("window must be an integer in [2,1000]")
+    if periods_per_year is None:
+        scaling={"daily":252,"weekly":52,"monthly":12,"quarterly":4,"annual":1}
+        if name=="annualized_volatility" and sources[0].frequency not in scaling:
+            raise ValueError("Explicit periods_per_year required for irregular volatility")
+        periods_per_year=scaling.get(sources[0].frequency,252)
     if type(periods_per_year) is not int or not 1 <= periods_per_year <= 366:
         raise ValueError("periods_per_year must be in [1,366]")
     if any(s.frequency != sources[0].frequency for s in sources):
         raise ValueError("Explicit resampling required for mixed frequencies")
     if len(sources) == 2 and sources[0].convention != sources[1].convention:
         raise ValueError("Incompatible observation conventions")
-    if name in SAME_UNITS and len(sources) == 2 and sources[0].unit != sources[1].unit:
+    if name in SAME_UNITS | {"ratio"} and len(sources) == 2 and sources[0].unit != sources[1].unit:
         raise ValueError("Incompatible units; explicit conversion required")
     if name in {"spread_basis_points", "basis_point_change"} and sources[0].unit != "percent":
         raise ValueError("Basis-point conversion requires percent-valued input")
@@ -296,7 +302,7 @@ def execute(name: str, *sources: Series, window: int = 5, periods_per_year: int 
                             v = (seq[-1]/seq[0]-1)*100 if seq[0] else None
                         elif name == "annualized_volatility":
                             returns = [(seq[j]/seq[j-1]-1) for j in range(1,len(seq)) if seq[j-1]]
-                            v = _std(returns)*Decimal(periods_per_year).sqrt()*100 if len(returns)==window-1 else None
+                            v = _std(returns)*Decimal(periods_per_year).sqrt()*100 if len(returns)==window-1 and len(returns)>=2 else None
                 elif a is not None:
                     if name == "identity": v = a
                     elif name == "absolute": v = abs(a)
@@ -388,6 +394,11 @@ def execute(name: str, *sources: Series, window: int = 5, periods_per_year: int 
     elif name in {"spread_basis_points","basis_point_change"}: unit = "basis_points"
     elif name in {"rolling_covariance"}: unit = sources[0].unit+" * "+sources[1].unit
     elif name == "multiply": unit = sources[0].unit+" * "+sources[1].unit
+    elif name == "square": unit = "("+sources[0].unit+")^2"
+    elif name == "square_root": unit = "sqrt("+sources[0].unit+")"
+    elif name == "reciprocal": unit = "1/("+sources[0].unit+")"
+    elif name in {"divide","rolling_beta"}:
+        unit = "dimensionless" if sources[0].unit==sources[1].unit else sources[0].unit+"/"+sources[1].unit
     return _series_result(name,sources,result,unit)
 
 
@@ -412,6 +423,6 @@ def execute_plan(inputs: Mapping[str,Series], steps: list[Mapping[str,Any]], as_
         name = step.get("operator")
         result = execute(name,*(environment[r] for r in refs),
                          window=step.get("window",5),
-                         periods_per_year=step.get("periods_per_year",252),as_of=as_of)
+                         periods_per_year=step.get("periods_per_year"),as_of=as_of)
         environment[key] = replace(result,key=key)
     return environment

@@ -1,0 +1,25 @@
+name: Offline analytical checks
+on:
+  push:
+    branches: [experiment/market-liquidity-launch]
+  pull_request:
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: financial_intelligence_agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile Python
+        run: python -m compileall -q src/financial_intelligence_agent app.py
+      - name: Credential-free tests
+        env:
+          PYTHONPATH: src
+        run: |
+          for suite in test_agent_dispatcher.py test_funding_conditions.py test_csv_rates_reader.py test_funding_sql_parity.py test_verified_briefing.py test_fredpipe_revision_contract.py; do
+            python -m unittest discover -s tests -p "$suite" -v
+          done

@@ -31,6 +31,7 @@ def main():
         check("NY Fed dealer metadata",lambda:
             {"count":len(dealer_catalog())}),
         check("NY Fed dealer JSON envelope",lambda: raw_dealer_shape()),
+        check("NY Fed repo operations JSON explorer",lambda: probe_repo_shape()),
         check("NY Fed real dealer time series",lambda:{"count":len(dealer("PDPOSGST-TOT",
                     (today-timedelta(days=365)).isoformat(),end).series.points)}),
         check("FDIC bank financials",lambda:
@@ -56,3 +57,17 @@ def raw_dealer_shape():
 
 if __name__=="__main__":
     raise SystemExit(main())
+
+
+def probe_repo_shape():
+    from financial_intelligence_agent.live.nyfed_explorer import discover,records_from_path
+    from datetime import date,timedelta
+    today=date.today()
+    sample=discover("rp/results/search.json",
+                    start=(today-timedelta(days=30)).isoformat(),
+                    end=today.isoformat())
+    details={}
+    for path in sample.candidate_paths[:6]:
+        rows=records_from_path(sample,path)
+        details[path]={"count":len(rows),"fields":list(rows[0])[:18] if rows else []}
+    return details

@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from financial_intelligence_agent.live.fdic import bank_financial,FIELDS
 from financial_intelligence_agent.live.providers import (
     catalog,fetch_series,dealer_catalog,Descriptor,FetchResult,FRED_PRESETS)
 from financial_intelligence_agent.live.charts import (
@@ -95,6 +96,26 @@ def _load_dealers():
                     st.error("Dealer response could not be validated: "+str(exc))
         else:st.info("No matching dealer series")
     st.caption("The New York Fed publishes primary-dealer aggregate series, not individual firms' complete balance sheets.")
+
+def _load_fdic():
+    st.markdown("#### FDIC bank-by-bank financial reports")
+    st.caption("Quarterly institution financials from the FDIC BankFind API, including Call Report-derived measures. These are NOT raw FFIEC CDR archives.")
+    col1,col2=st.columns(2)
+    cert=col1.number_input("FDIC certificate",min_value=1,max_value=999999,value=14,step=1)
+    from_ = col2.date_input("From quarter",date(2022,1,1),key="fdic_begin")
+    name=st.selectbox("Financial metric",list(FIELDS),
+                      format_func=lambda v:FIELDS[v]+" ("+v+")")
+    custom=st.text_input("Or enter another FDIC field code",placeholder="e.g. NETINC")
+    code=custom.strip().upper() or name
+    if st.button("Fetch FDIC quarterly bank history",key="load_fdic"):
+        try:
+            result=bank_financial(int(cert),code,from_.isoformat(),date.today().isoformat())
+            _add(result.descriptor.id,result.series,result.descriptor,
+                 result.retrieved_at,result.warning)
+            st.success("Loaded "+str(len(result.series.points))+" quarterly observations")
+        except Exception as exc:
+            st.error("FDIC query rejected: "+str(exc))
+    st.caption("Bank metrics can use different accounting units. Verify unit definitions from FDIC before comparing or transforming.")
 
 def _load_upload():
     st.markdown("#### Import tabular research data")
@@ -234,10 +255,11 @@ def render():
     st.info("Live mode fetches upstream API data on demand. Publisher release dates and data vintages are not guaranteed. "
             "Never treat this as a real-time trading feed.")
     with st.expander("Data acquisition",expanded=not bool(_state())):
-        tab1,tab2,tab3=st.tabs(["FRED + NY Fed rates","Primary-dealer reporting","FFIEC / CSV upload"])
+        tab1,tab2,tab3,tab4=st.tabs(["FRED + NY Fed rates","Primary dealers","FDIC bank financials","FFIEC / CSV upload"])
         with tab1:_load_public_series()
         with tab2:_load_dealers()
-        with tab3:_load_upload()
+        with tab3:_load_fdic()
+        with tab4:_load_upload()
     ws=_state()
     if ws:
         st.subheader("Working data catalog")

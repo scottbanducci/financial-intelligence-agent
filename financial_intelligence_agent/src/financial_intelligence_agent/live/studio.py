@@ -22,6 +22,7 @@ from financial_intelligence_agent.live.workspaces import export_workspace,import
 from financial_intelligence_agent.live.charts import (
     ChartSpec,prepare,interactive_chart,image_bytes,csv_bytes,metadata_bytes,MODES,STYLES,research_bundle_bytes,chart_recipe_bytes,load_chart_recipe)
 from financial_intelligence_agent.engine.operators import Series,execute,OPERATOR_SPECS
+from financial_intelligence_agent.engine.alerts import Rule,evaluate,COMPARES
 from financial_intelligence_agent.engine.normalization import convert_units,resample,align_date_convention,UNITS,ORDER,AGGREGATIONS
 from financial_intelligence_agent.engine.adapters import CsvSeriesAdapter,FFIECAdapter
 from financial_intelligence_agent.agent.operator_planner import AnalyticalService
@@ -287,6 +288,23 @@ def _operators():
                  "Explicit conversion requested by analyst. Verify period and vintage alignment.")
             st.success("Normalized data added: "+new_key)
         except Exception as exc:st.error("Normalization rejected: "+str(exc))
+    st.markdown("##### Research signal check")
+    st.caption("One-shot threshold evaluation with provenance; continuous monitoring requires a deployed scheduled service.")
+    rule_cols=st.columns(3)
+    signal_name=rule_cols[0].selectbox("Measure to check",names,key="signal_series")
+    comparator=rule_cols[1].selectbox("Condition",sorted(COMPARES),key="signal_condition")
+    threshold=rule_cols[2].number_input("Threshold (source unit)",value=0.0,key="signal_level")
+    signal_horizon=st.number_input("Comparison lookback (non-null observations)",
+                                    min_value=1,max_value=365,value=1,key="signal_horizon")
+    if st.button("Evaluate signal",key="evaluate_signal"):
+        try:
+            rule=Rule("User-defined signal",ws[signal_name]["series"].key,
+                      comparator,threshold,int(signal_horizon))
+            output=evaluate(rule,ws[signal_name]["series"])
+            st.json(output)
+            st.download_button("Export evaluated signal JSON",json.dumps(output,indent=2),
+                  file_name="liquidity-signal-evaluation.json",mime="application/json")
+        except Exception as exc:st.error("Signal rejected: "+str(exc))
     with st.expander("Direct JSON multi-step operator plan"):
         default={"steps":[{"id":"change","operator":"first_difference","inputs":[names[0]]}],
                  "result_id":"change"}

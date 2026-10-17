@@ -55,8 +55,6 @@ def raw_dealer_shape():
              if isinstance(v,list) and v and isinstance(v[0],dict)} if isinstance(pd,dict) else {},
     }
 
-if __name__=="__main__":
-    raise SystemExit(main())
 
 
 def probe_repo_shape():
@@ -71,3 +69,6 @@ def probe_repo_shape():
         rows=records_from_path(sample,path)
         details[path]={"count":len(rows),"fields":list(rows[0])[:18] if rows else []}
     return details
+
+if __name__=="__main__":
+    raise SystemExit(main())

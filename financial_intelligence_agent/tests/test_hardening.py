@@ -24,7 +24,11 @@ class HardeningTests(unittest.TestCase):
                 inputs=(a,b) if spec.arity==2 else (a,)
                 result=execute(op,*inputs,window=8)
                 self.assertEqual(len(result.points),90)
-                self.assertTrue(any(p.value is not None for p in result.points),op)
+                if op.startswith("year_over_year_"):
+                    # Ninety days cannot contain a prior-year match.
+                    self.assertTrue(all(p.value is None for p in result.points),op)
+                else:
+                    self.assertTrue(any(p.value is not None for p in result.points),op)
 
     def test_strict_basis_points_unit(self):
         a=make_source([1,2,3],unit="USD")

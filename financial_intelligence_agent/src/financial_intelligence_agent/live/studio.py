@@ -20,7 +20,7 @@ from financial_intelligence_agent.live.providers import (
     catalog,fetch_series,dealer_catalog,Descriptor,FetchResult,FRED_PRESETS)
 from financial_intelligence_agent.live.workspaces import export_workspace,import_workspace
 from financial_intelligence_agent.live.charts import (
-    ChartSpec,prepare,interactive_chart,image_bytes,csv_bytes,metadata_bytes,MODES,STYLES)
+    ChartSpec,prepare,interactive_chart,image_bytes,csv_bytes,metadata_bytes,MODES,STYLES,research_bundle_bytes,chart_recipe_bytes,load_chart_recipe)
 from financial_intelligence_agent.engine.operators import Series,execute,OPERATOR_SPECS
 from financial_intelligence_agent.engine.normalization import convert_units,resample,align_date_convention,UNITS,ORDER,AGGREGATIONS
 from financial_intelligence_agent.engine.adapters import CsvSeriesAdapter,FFIECAdapter
@@ -304,6 +304,19 @@ def _chart_builder():
         st.info("Fetch or import one or more series to unlock chart building and exports.")
         return
     st.markdown("### Chart designer")
+    with st.expander("Validate an existing chart recipe"):
+        uploaded_recipe=st.file_uploader("Select a saved chart recipe (.json)",
+                                        type=["json"],key="saved_chart_recipe")
+        if uploaded_recipe is not None and st.button("Check recipe against current workspace"):
+            try:
+                restored,layout=load_chart_recipe(uploaded_recipe.getvalue(),
+                    {k:v["series"] for k,v in ws.items()})
+                st.success("Verified source fingerprints and chart schema")
+                st.json({"title":layout.title,"mode":layout.mode,"style":layout.style,
+                         "series":list(restored)})
+                st.caption("Apply these documented selections below. Chart recipes are intentionally inert JSON.")
+            except Exception as exc:
+                st.error("Chart recipe unavailable: "+str(exc))
     selected=st.multiselect("Datasets",list(ws),default=list(ws)[:min(2,len(ws))],
                             max_selections=12,key="plot_selection")
     if not selected:return
@@ -343,6 +356,15 @@ def _chart_builder():
         d.download_button("Chart provenance JSON",metadata_bytes(chosen,spec,unit,warnings),
                           file_name="liquidity-chart-provenance.json",mime="application/json",
                           key="export_chart_meta")
+        p,q=st.columns(2)
+        p.download_button("Download full research bundle (.zip)",
+                          research_bundle_bytes(frame,spec,unit,chosen,warnings),
+                          file_name="liquidity-research-bundle.zip",
+                          mime="application/zip",key="export_chart_bundle")
+        q.download_button("Save reusable chart recipe (.json)",
+                          chart_recipe_bytes(chosen,spec),
+                          file_name="liquidity-chart-recipe.json",
+                          mime="application/json",key="export_chart_recipe")
         st.caption("PNG and SVG include chart title, unit-aware y-axis, observation-date x-axis, legend, source attribution and caveats.")
     except Exception as exc:
         st.error("Chart validation: "+str(exc))

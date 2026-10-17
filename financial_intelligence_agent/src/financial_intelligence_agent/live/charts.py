@@ -192,3 +192,61 @@ def metadata_bytes(sources:Mapping[str,Series],spec:ChartSpec,unit:str,warnings:
              "warnings":warnings,
              "created_at":datetime.now(timezone.utc).isoformat()}
     return json.dumps(payload,indent=2,sort_keys=True).encode("utf-8")
+
+
+def research_bundle_bytes(data:pd.DataFrame,spec:ChartSpec,unit:str,
+                          sources:Mapping[str,Series],warnings:list[str])->bytes:
+    """Single self-contained research artifact with chart, raw values and provenance.
+
+    ZIP member names are fixed to prevent traversal. The included CSV and
+    image contain only user-selected series and window, not credentials.
+    """
+    from zipfile import ZipFile,ZIP_DEFLATED
+    package=io.BytesIO()
+    with ZipFile(package,"w",compression=ZIP_DEFLATED,compresslevel=6) as archive:
+        archive.writestr("chart.png",image_bytes(data,spec,unit,"png"))
+        archive.writestr("chart.svg",image_bytes(data,spec,unit,"svg"))
+        archive.writestr("observations.csv",csv_bytes(data))
+        archive.writestr("provenance.json",metadata_bytes(sources,spec,unit,warnings))
+    return package.getvalue()
+
+
+def chart_recipe_bytes(sources:Mapping[str,Series],spec:ChartSpec)->bytes:
+    """Safe portable chart layout; references fingerprint-pinned workspace keys."""
+    spec_data={
+        "schema":"liquidity-chart-recipe/v1","title":spec.title,
+        "subtitle":spec.subtitle,"mode":spec.mode,"style":spec.style,
+        "start":spec.start.isoformat() if spec.start else None,
+        "end":spec.end.isoformat() if spec.end else None,
+        "source_note":spec.source_note,"footnote":spec.footnote,
+        "sources":[{"key":name,"fingerprint":series.fingerprint()} for name,series in sources.items()],
+    }
+    return json.dumps(spec_data,sort_keys=True,indent=2).encode("utf-8")
+
+
+def load_chart_recipe(raw:bytes,workspace:Mapping[str,Series])->tuple[dict,ChartSpec]:
+    if len(raw)>100_000:
+        raise ValueError("Chart recipe exceeds 100 KB")
+    data=json.loads(raw)
+    expected={"schema","title","subtitle","mode","style","start","end","source_note","footnote","sources"}
+    if not isinstance(data,dict) or set(data)!=expected or data["schema"]!="liquidity-chart-recipe/v1":
+        raise ValueError("Unsupported chart recipe schema")
+    items=data["sources"]
+    if not isinstance(items,list) or not 1<=len(items)<=MAX_CHART_SERIES:
+        raise ValueError("Invalid chart recipe series")
+    sources={}
+    for item in items:
+        if not isinstance(item,dict) or set(item)!={"key","fingerprint"}:
+            raise ValueError("Malformed chart source reference")
+        key=item["key"]
+        if key not in workspace or key in sources:
+            raise ValueError("Recipe requires a distinct series in the current workspace")
+        s=workspace[key]
+        if s.fingerprint()!=item["fingerprint"]:
+            raise ValueError("Chart recipe source fingerprint mismatch; reload original source")
+        sources[key]=s
+    spec=ChartSpec(data["title"],data["subtitle"],data["mode"],data["style"],
+                   date.fromisoformat(data["start"]) if data["start"] else None,
+                   date.fromisoformat(data["end"]) if data["end"] else None,
+                   data["source_note"],data["footnote"])
+    return sources,spec

@@ -5,7 +5,7 @@ from decimal import Decimal
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
 from financial_intelligence_agent.engine.operators import Series,Point
-from financial_intelligence_agent.live.charts import ChartSpec,prepare,image_bytes,csv_bytes,metadata_bytes,interactive_chart
+from financial_intelligence_agent.live.charts import ChartSpec,prepare,image_bytes,csv_bytes,metadata_bytes,interactive_chart,research_bundle_bytes,chart_recipe_bytes,load_chart_recipe
 
 def s(key,unit,vals):
     return Series(key,"FRED",unit,"daily",tuple(Point(date(2026,10,i+1),v) for i,v in enumerate(vals)))
@@ -29,6 +29,23 @@ class Charts(unittest.TestCase):
         self.assertIn(b"2026-10-04",exported)
         self.assertIn(b"fingerprint",metadata_bytes({"SOFR":self.a},spec,unit,warnings))
         self.assertEqual(len(interactive_chart(df,spec,unit).data),2)
+    def test_publication_bundle_and_recipe(self):
+        from zipfile import ZipFile
+        from io import BytesIO
+        spec=ChartSpec("Money Market Rates","Historical source observations")
+        sources={"SOFR":self.a,"IORB":self.b}
+        df,unit,warnings=prepare(sources,spec)
+        content=research_bundle_bytes(df,spec,unit,sources,warnings)
+        with ZipFile(BytesIO(content)) as package:
+            self.assertEqual(set(package.namelist()),
+                {"chart.png","chart.svg","observations.csv","provenance.json"})
+            self.assertTrue(package.read("chart.png").startswith(bytes([137,80,78,71])))
+        recipe=chart_recipe_bytes(sources,spec)
+        restored,restored_spec=load_chart_recipe(recipe,sources)
+        self.assertEqual(restored_spec.title,spec.title)
+        self.assertEqual(len(restored),2)
+        with self.assertRaisesRegex(ValueError,"fingerprint mismatch"):
+            load_chart_recipe(recipe,{"SOFR":self.b,"IORB":self.a})
     def test_units_and_normalization(self):
         different=s("credit","USD billions",[100,105,99,110])
         with self.assertRaisesRegex(ValueError,"matching units"):

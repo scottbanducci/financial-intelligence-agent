@@ -51,22 +51,44 @@ def _load_public_series():
     presets=catalog()
     choices={d.label+"  ·  "+d.id:d.id for d in presets}
     choice=st.selectbox("Curated publisher series",list(choices),key="live_choice")
+    query=st.text_input("Search the complete FRED series catalog",placeholder="e.g. commercial-bank loans")
+    user_fred_key=st.text_input("Your FRED API key (session only; optional when configured server-side)",
+                                type="password",key="studio_fred_key")
+    if st.button("Search FRED",key="fred_search_button"):
+        try:
+            from financial_intelligence_agent.live.providers import fred_search
+            st.session_state["fred_search_result"]=fred_search(query,api_key=user_fred_key or None)
+        except Exception as exc:st.error("Search unavailable: "+str(exc))
+    matches=st.session_state.get("fred_search_result",[])
+    if matches:
+        selected_search=st.selectbox("Publisher search results",matches,
+            format_func=lambda d:(d.label+" · "+d.id+" · "+d.unit)[:190],
+            key="fred_search_result_select")
+        st.caption("Select a search result and click Fetch; its reported units/frequency are retained.")
     x,y,z=st.columns([1,1,1])
     start=x.date_input("From",date.today()-timedelta(days=365*3),key="live_start")
     end=y.date_input("Through",date.today(),key="live_end")
     custom=z.text_input("FRED ID (optional)",placeholder="e.g. WALCL",key="live_fred_custom").strip().upper()
-    series_id="FRED:"+custom if custom else choices[choice]
+    use_search=st.checkbox("Fetch selected FRED search result",value=False,key="choose_search_result") if matches else False
+    series_id=selected_search.id if use_search else ("FRED:"+custom if custom else choices[choice])
     if st.button("Fetch current publisher data",type="primary",key="get_live"):
         try:
-            if series_id.startswith("FRED:") and not os.getenv("FRED_API_KEY"):
-                raise ValueError("Set FRED_API_KEY in the server environment or Databricks App secrets")
+            if series_id.startswith("FRED:") and not (user_fred_key or os.getenv("FRED_API_KEY")):
+                raise ValueError("Supply your FRED API key or configure server-side credentials")
             with st.spinner("Fetching and validating publisher observations"):
-                result=_cached_fetch(series_id,start.isoformat(),end.isoformat())
+                if series_id.startswith("FRED:") and user_fred_key:
+                    result=fetch_series(series_id,start.isoformat(),end.isoformat(),api_key=user_fred_key)
+                else:
+                    result=_cached_fetch(series_id,start.isoformat(),end.isoformat())
+            if use_search:
+                described=selected_search
+                result=replace(result,series=replace(result.series,unit=described.unit,frequency=described.frequency),
+                               descriptor=described)
             _add(series_id,result.series,result.descriptor,result.retrieved_at,result.warning)
             st.success("Loaded "+str(len(result.series.points))+" observed records from "+result.descriptor.provider)
         except Exception as exc:
             st.error("Live fetch failed (no fixture fallback): "+str(exc))
-    st.caption("NY Fed Markets reference rates are public. FRED requires a server-side key. Revisions and publication timing are not guaranteed by these current-vintage views.")
+    st.caption("NY Fed reference rates are public. FRED keys are never exported; users of a commercial FRED application may need their own FRED API keys. Revisions and publication timing are not guaranteed.")
 
 def _load_dealers():
     st.markdown("#### NY Federal Reserve primary dealers")

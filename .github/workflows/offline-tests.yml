@@ -28,7 +28,7 @@ jobs:
           from streamlit.testing.v1 import AppTest
           app=AppTest.from_file("app.py",default_timeout=30).run()
           if app.exception: raise AssertionError(str(app.exception))
-          for target in ("Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"):
+          for target in ("Live Data Studio","Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"):
               app.sidebar.radio[0].set_value(target).run()
               if app.exception: raise AssertionError(target+": "+str(app.exception))
               print("Render succeeded:",target)

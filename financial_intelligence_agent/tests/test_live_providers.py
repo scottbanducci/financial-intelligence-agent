@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
 from financial_intelligence_agent.live.providers import (
-    fred,ny_rate,dealer,dealer_catalog,fetch_series,catalog,validate_dates)
+    fred,ny_rate,dealer,dealer_catalog,fetch_series,catalog,validate_dates,fred_search)
 
 API_KEY="a"*32
 class ProviderTests(unittest.TestCase):
@@ -52,6 +52,19 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"structure changed"):
             dealer("PDPOSGST-TOT","2026-10-01","2026-10-08",
                    fetch=lambda *a,**kw:{"pd":{"unexpected":[]}})
+    def test_dynamic_fred_catalog(self):
+        payload={"seriess":[{"id":"TOTBKCR","title":"Bank credit",
+                    "frequency_short":"W","units":"Billions of Dollars"}]}
+        d=fred_search("bank credit",api_key=API_KEY,fetch=lambda *a,**kw:payload)
+        self.assertEqual(d[0].id,"FRED:TOTBKCR")
+        self.assertEqual(d[0].unit,"Billions of USD")
+        self.assertEqual(d[0].frequency,"weekly")
+    def test_key_exception_does_not_leak(self):
+        def bad(*a,**kw):
+            raise RuntimeError("Full request /?api_key="+API_KEY)
+        with self.assertRaisesRegex(ValueError,"Publisher request failed") as ctx:
+            fred("SOFR","2026-01-01","2026-02-01",api_key=API_KEY,fetch=bad)
+        self.assertNotIn(API_KEY,str(ctx.exception))
     def test_bounds_and_catalog(self):
         self.assertGreaterEqual(len(catalog()),30)
         with self.assertRaises(ValueError):

@@ -266,3 +266,41 @@ def fetch_series(series_id:str,start:str,end:str,*,fetch:Callable[...,dict]|None
     if series_id.startswith("NYFED_PD:"):
         return dealer(series_id[9:],start,end,fetch=fetch)
     raise ValueError("Unrecognized provider ID")
+
+
+def fred_search(text:str,*,api_key:str|None=None,
+                fetch:Callable[...,dict]|None=None,limit:int=35)->list[Descriptor]:
+    """Search the live FRED catalog, not merely the curated landing-page IDs."""
+    if not isinstance(text,str) or not 2<=len(text.strip())<=140:
+        raise ValueError("Search term must be 2..140 characters")
+    if type(limit) is not int or not 1<=limit<=100:
+        raise ValueError("Search limit must be between 1 and 100")
+    key=api_key if api_key is not None else os.getenv("FRED_API_KEY","")
+    if not re.fullmatch(r"[a-z0-9]{32}",key):
+        raise ValueError("FRED API key required")
+    url="https://api.stlouisfed.org/fred/series/search?"+urlencode({
+        "search_text":text.strip(),"api_key":key,
+        "file_type":"json","limit":limit,
+    })
+    payload=_get(url,"api.stlouisfed.org",fetch)
+    records=payload.get("seriess")
+    if not isinstance(records,list):
+        raise ValueError("Malformed FRED search results")
+    fmap={"D":"daily","W":"weekly","BW":"irregular","M":"monthly",
+          "Q":"quarterly","A":"annual","SA":"irregular"}
+    results=[]
+    for row in records:
+        ident=row.get("id","")
+        if not KEY.fullmatch(ident):continue
+        full=str(row.get("units","source-native"))
+        u=full.lower()
+        if u=="percent":unit="percent"
+        elif u in {"millions of dollars","millions of u.s. dollars"}:unit="Millions of USD"
+        elif u in {"billions of dollars","billions of u.s. dollars"}:unit="Billions of USD"
+        elif "index" in u:unit="index"
+        else:unit=full[:90] or "source-native"
+        results.append(Descriptor("FRED:"+ident,str(row.get("title",ident))[:180],
+                 "FRED",unit,fmap.get(row.get("frequency_short"),"irregular"),
+                 "FRED Search","https://fred.stlouisfed.org/series/"+ident,
+                 "FRED_realtime_vintage"))
+    return results

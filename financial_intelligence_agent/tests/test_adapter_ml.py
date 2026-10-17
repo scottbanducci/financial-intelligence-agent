@@ -1,5 +1,6 @@
 import sys
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from datetime import date,timedelta
 ROOT=Path(__file__).resolve().parents[1]
@@ -13,14 +14,14 @@ class TestAdaptersAndML(unittest.TestCase):
         s=FredAdapter("SOFR","percent","daily").parse({"observations":[
             {"date":"2026-01-01","value":"3.50","realtime_start":"2026-01-02"},
             {"date":"2026-01-01","value":"3.55","realtime_start":"2026-01-10"}]})
-        self.assertEqual(s.select("2026-01-05").points[0].value,3.5)
-        self.assertEqual(s.select("2026-01-12").points[0].value,3.55)
+        self.assertEqual(s.select("2026-01-05").points[0].value,Decimal('3.5'))
+        self.assertEqual(s.select("2026-01-12").points[0].value,Decimal('3.55'))
         self.assertEqual(s.convention,"FRED_realtime_vintage")
     def test_provider_independent(self):
         ny=NYFedAdapter(key="repo",unit="percent",frequency="daily",records_path=("data","rates"),
                         date_field="date",value_field="rate")
         parsed=ny.parse({"data":{"rates":[{"date":"2026-01-01","rate":"3.85"}]}})
-        self.assertEqual(parsed.points[0].value,3.85)
+        self.assertEqual(parsed.points[0].value,Decimal('3.85'))
         ff=FFIECAdapter(field="RCON0010",institution_field="IDRSSD",institution_id="42",
                         date_field="report_date",unit="USD_thousands")
         bank=ff.parse("IDRSSD\treport_date\tRCON0010\n42\t2026-03-31\t100\n43\t2026-03-31\t999\n")

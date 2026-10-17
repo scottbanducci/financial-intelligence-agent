@@ -14,12 +14,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Compile Python
+      - name: Compile application
         run: python -m compileall -q src/financial_intelligence_agent app.py
-      - name: Credential-free tests
+      - name: Run all credential-free regression tests
         env:
           PYTHONPATH: src
-        run: |
-          for suite in test_agent_dispatcher.py test_funding_conditions.py test_csv_rates_reader.py test_funding_sql_parity.py test_verified_briefing.py test_fredpipe_revision_contract.py; do
-            python -m unittest discover -s tests -p "$suite" -v
-          done
+        run: python -m unittest discover -s tests -p 'test_*.py' -v

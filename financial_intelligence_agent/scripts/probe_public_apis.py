@@ -31,6 +31,8 @@ def main():
         check("NY Fed dealer metadata",lambda:
             {"count":len(dealer_catalog())}),
         check("NY Fed dealer JSON envelope",lambda: raw_dealer_shape()),
+        check("NY Fed real dealer time series",lambda:{"count":len(dealer("PDPOSGST-TOT",
+                    (today-timedelta(days=365)).isoformat(),end).series.points)}),
         check("FDIC bank financials",lambda:
             {"count":len(bank_financial(14,"ASSET",
                             (today-timedelta(days=550)).isoformat(),end).series.points)}),

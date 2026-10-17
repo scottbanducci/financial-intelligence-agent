@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from financial_intelligence_agent.live.panels import fetch_bank_panel,contraction_breadth
 from financial_intelligence_agent.live.databricks_gold import read_gold,descriptors as gold_descriptors
 from financial_intelligence_agent.live.fdic import bank_financial,FIELDS
 from financial_intelligence_agent.live.providers import (
@@ -164,6 +165,30 @@ def _load_gold():
             _add(chosen.id,result.series,result.descriptor,result.retrieved_at,result.warning)
             st.success("Loaded "+str(len(result.series.points))+" Gold observations")
         except Exception as exc:st.error("Gold query unavailable: "+str(exc))
+
+def _load_breadth():
+    st.markdown("#### Institutional loan contraction breadth")
+    st.caption("Download matched institution quarterly financials and calculate the fraction of banks with YoY declines. This is a true cross-bank measure, not category breadth.")
+    field=st.selectbox("Bank metric",["LNLSGR","DEP","ASSET","LNLSNET","NETINC"],
+                      format_func=lambda code:FIELDS.get(code,code),key="panel_field")
+    years=st.slider("Quarterly lookback (years)",2,5,3,key="panel_years")
+    if st.button("Fetch population and calculate breadth",key="fetch_breadth"):
+        try:
+            with st.spinner("Paging FDIC bank-level reports; this may require many requests"):
+                panel=fetch_bank_panel(field,(date.today()-timedelta(days=365*years)).isoformat(),
+                                         date.today().isoformat())
+                report=contraction_breadth(panel)
+            series=report["series"]
+            key="FDIC_BREADTH_"+field
+            series=replace(series,key=key)
+            _add(key,series,_entry_desc(key,series),
+                 datetime.now(timezone.utc).isoformat(),
+                 "Panel derived from "+str(len(panel.records))+" bank-quarter rows; "
+                 "not point-in-time vintage verified.")
+            st.success("Computed bank contraction breadth by quarter")
+            st.dataframe(pd.DataFrame(report["table"]),hide_index=True,use_container_width=True)
+            for limitation in report["limitations"]:st.caption(limitation)
+        except Exception as exc:st.error("Panel analysis unavailable: "+str(exc))
 
 def _load_upload():
     st.markdown("#### Import tabular research data")
@@ -330,12 +355,13 @@ def render():
     st.info("Live mode fetches upstream API data on demand. Publisher release dates and data vintages are not guaranteed. "
             "Never treat this as a real-time trading feed.")
     with st.expander("Data acquisition",expanded=not bool(_state())):
-        tab1,tab2,tab3,tab4,tab5=st.tabs(["FRED + NY Fed rates","Primary dealers","FDIC bank financials","Databricks Gold","FFIEC / CSV upload"])
+        tab1,tab2,tab3,tab4,tab5,tab6=st.tabs(["FRED + NY Fed rates","Primary dealers","FDIC bank financials","Bank contraction breadth","Databricks Gold","FFIEC / CSV upload"])
         with tab1:_load_public_series()
         with tab2:_load_dealers()
         with tab3:_load_fdic()
-        with tab4:_load_gold()
-        with tab5:_load_upload()
+        with tab4:_load_breadth()
+        with tab5:_load_gold()
+        with tab6:_load_upload()
     ws=_state()
     if ws:
         st.subheader("Working data catalog")

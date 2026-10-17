@@ -12,6 +12,7 @@ from financial_intelligence_agent.tools.snapshot_insights import MacroSnapshot,F
 from financial_intelligence_agent.engine.operators import Point,Series,execute,OPERATOR_SPECS,dec,day
 from financial_intelligence_agent.engine.ml import ALGORITHMS,REGRESSORS,make_supervised,walk_forward
 from financial_intelligence_agent.agent.operator_planner import AnalyticalService
+from financial_intelligence_agent.live.studio import render as live_studio
 import json
 
 st.set_page_config(page_title="Market Liquidity | Research Workbench",layout="wide",page_icon="◈")
@@ -46,13 +47,16 @@ def header(section,title,description):
 engine=make_engine()
 st.sidebar.markdown("### ◈ LIQUIDITY INTELLIGENCE")
 st.sidebar.caption("EXPERIMENTAL / RESEARCH WORKBENCH")
-page=st.sidebar.radio("Workspace",["Command center","Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"])
+page=st.sidebar.radio("Workspace",["Command center","Live Data Studio","Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"])
 st.sidebar.divider()
 st.sidebar.error("HISTORICAL FIXTURE\n\nCutoff: 2026-10-10. Not live, not vintage-verified.")
 st.sidebar.caption(f'{len(OPERATOR_SPECS)} deterministic operators · {len(ALGORITHMS)} registered ML algorithms')
 st.sidebar.link_button("GitHub branch ↗","https://github.com/scottbanducci/financial-intelligence-agent/tree/experiment/market-liquidity-launch")
 
-if page=="Command center":
+if page=="Live Data Studio":
+    live_studio()
+
+elif page=="Command center":
     header("01 / Macro overview","Market liquidity, decomposed",
            "Distinct funding, reserve and banking indicators, each with its own source date and measurement convention.")
     fed=engine.invoke("get_fed_liquidity");bank=engine.invoke("get_bank_credit")

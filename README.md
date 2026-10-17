@@ -1,32 +1,25 @@
-# Market Liquidity Monitor — experimental portfolio build
+# Financial Intelligence Agent — Market Liquidity Monitor
 
-This repository contains a Databricks financial-data pipeline and an experimental
-Streamlit research UI. **The UI is a frozen historical fixture demo, not a
-deployed live product.** The tool calculations, offline tests and evidence
-metadata are available on the experimental branch.
+Experimental financial data research platform built around a provider-neutral,
+deterministic operator engine, ML evaluation and bounded LLM tool orchestration.
 
-## Try the historical research UI
+**48 operators | 24 registered ML algorithms | 4 provider adapter families |
+6 UI workspaces | reproducible tests and evidence**
+
+[Experimental branch](https://github.com/scottbanducci/financial-intelligence-agent/tree/experiment/market-liquidity-launch) |
+[Draft pull request #2](https://github.com/scottbanducci/financial-intelligence-agent/pull/2) |
+[Technical architecture](financial_intelligence_agent/docs/architecture.md)
+
+## Run
 
     cd financial_intelligence_agent
     python -m pip install -r requirements.txt
     streamlit run app.py
 
-No cloud credentials needed for the default deterministic mode.
+Default mode is credential-free and does not make LLM requests. Model-based
+tool selection is explicitly opt-in and requires an API key.
 
-Features: 4 bounded analytical tools; rate and balance-sheet charts; SHA-256
-snapshot fingerprints; evidence-bearing calculations; fixed-source warnings;
-optional LLM tool selection (requires OPENAI_API_KEY, incurs API charges).
-
-See financial_intelligence_agent/docs/launch.md for offline testing, known
-limitations, model safety and Databricks deployment steps.
-
-## Technical boundaries
-
-Existing Databricks job and pipeline definitions are preserved.
-Historical JSON and CSV fixtures do not imply current releases or verified
-publication-time vintages. The application has not yet been deployed and
-validated in Databricks Apps. Live serving, snapshot publication, complete
-historical provenance, authentication and uptime monitoring remain planned.
-
-The original description of completed production evaluation and deployment
-was aspirational and is not claimed as an accomplished result here.
+**Not live:** the UI currently operates on committed historical 2026 fixtures,
+not on verified current Databricks Gold data. Real-time provider ingestion,
+historically correct vintages, production service auth and Databricks Apps
+deployment remain outstanding. The existing refresh job is not modified.

@@ -1,4 +1,4 @@
-name: Offline analytical checks
+name: Offline analytical and app checks
 on:
   push:
     branches: [experiment/market-liquidity-launch]
@@ -14,9 +14,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Compile application
+      - name: Install application and ML dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile sources
         run: python -m compileall -q src/financial_intelligence_agent app.py
-      - name: Run all credential-free regression tests
+      - name: Run complete offline test suite
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Six-page Streamlit rendering smoke test
+        run: |
+          python - <<'PY'
+          from streamlit.testing.v1 import AppTest
+          app=AppTest.from_file("app.py",default_timeout=30).run()
+          if app.exception: raise AssertionError(str(app.exception))
+          for target in ("Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"):
+              app.sidebar.radio[0].set_value(target).run()
+              if app.exception: raise AssertionError(target+": "+str(app.exception))
+              print("Render succeeded:",target)
+          PY

@@ -11,6 +11,8 @@ from financial_intelligence_agent.data.csv_rates import CsvRatesReader
 from financial_intelligence_agent.tools.snapshot_insights import MacroSnapshot,FROZEN_CUTOFF
 from financial_intelligence_agent.engine.operators import Point,Series,execute,OPERATOR_SPECS,dec,day
 from financial_intelligence_agent.engine.ml import ALGORITHMS,REGRESSORS,make_supervised,walk_forward
+from financial_intelligence_agent.agent.operator_planner import AnalyticalService
+import json
 
 st.set_page_config(page_title="Market Liquidity | Research Workbench",layout="wide",page_icon="◈")
 st.markdown("""
@@ -166,6 +168,29 @@ elif page=="Analyst agent":
             for warning in answer["result"].get("warnings",[]):st.warning(warning)
             with st.expander("Execution trace and citations",expanded=True):st.json(answer)
         except Exception as exc:st.error("Analysis rejected: "+str(exc))
+    st.divider()
+    st.subheader("Multi-step deterministic operator planner")
+    st.caption("Generate or inspect bounded calculations over the normalized catalog. No SQL or executable model code.")
+    recipe_example={"steps":[
+        {"id":"spread","operator":"spread_basis_points","inputs":["sofr","iorb"]},
+        {"id":"mean","operator":"rolling_mean","inputs":["spread"],"window":10}
+    ],"result_id":"mean"}
+    recipe=st.text_area("JSON plan",value=json.dumps(recipe_example,indent=2),height=210)
+    plan_left,plan_right=st.columns(2)
+    if plan_left.button("Run validated plan"):
+        try:
+            result=AnalyticalService(rates()).run(json.loads(recipe))
+            st.json(result)
+        except Exception as exc:
+            st.error("Plan rejected: "+str(exc))
+    if plan_right.button("Generate via LLM (paid)"):
+        if not use_llm:
+            st.error("First enable paid LLM routing above.")
+        else:
+            try:
+                st.json(AnalyticalService(rates()).run_llm(question.strip() or selected,model=model))
+            except Exception as exc:
+                st.error("Model planning unavailable: "+str(exc))
 
 else:
     header("06 / Source contracts","Data catalog & provenance",

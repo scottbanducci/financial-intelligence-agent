@@ -19,6 +19,7 @@ from financial_intelligence_agent.live.providers import (
 from financial_intelligence_agent.live.charts import (
     ChartSpec,prepare,interactive_chart,image_bytes,csv_bytes,metadata_bytes,MODES,STYLES)
 from financial_intelligence_agent.engine.operators import Series,execute,OPERATOR_SPECS
+from financial_intelligence_agent.engine.normalization import convert_units,resample,align_date_convention,UNITS,ORDER,AGGREGATIONS
 from financial_intelligence_agent.engine.adapters import CsvSeriesAdapter,FFIECAdapter
 from financial_intelligence_agent.agent.operator_planner import AnalyticalService
 
@@ -187,6 +188,33 @@ def _operators():
                  "; historical release timestamps may be unknown.")
             st.success("Derived series now available for charting")
         except Exception as exc:st.error("Operator rejected: "+str(exc))
+    st.markdown("##### Explicitly normalize units and observation frequency")
+    u1,u2,u3=st.columns(3)
+    chosen=u1.selectbox("Transform series",names,key="normalize_series")
+    kind=u2.selectbox("Transformation",["Unit conversion","Resample to slower frequency","Align observation-date convention"],key="normalize_method")
+    incoming=ws[chosen]["series"]
+    if kind=="Unit conversion":
+        valid=[name for name,(dimension,_) in UNITS.items()
+               if incoming.unit in UNITS and UNITS[incoming.unit][0]==dimension]
+        destination=u3.selectbox("Target unit",valid,key="normalize_unit") if valid else None
+    elif kind=="Resample to slower frequency":
+        targets=[freq for freq,order in ORDER.items()
+                 if incoming.frequency in ORDER and order>ORDER[incoming.frequency]]
+        destination=u3.selectbox("Target frequency",targets,key="normalize_freq") if targets else None
+        aggregator=st.selectbox("Aggregation / stock-vs-flow choice",AGGREGATIONS,key="normalize_aggregate")
+    else:destination="observation_date"
+    if st.button("Apply normalization",key="apply_normalization"):
+        try:
+            if not destination:raise ValueError("No valid conversion for this input")
+            if kind=="Unit conversion":out=convert_units(incoming,destination)
+            elif kind=="Resample to slower frequency":out=resample(incoming,destination,aggregator)
+            else:out=align_date_convention(incoming)
+            new_key=("norm_"+chosen).replace(":","_")[:85]
+            out=replace(out,key=new_key)
+            _add(new_key,out,_entry_desc(new_key,out),datetime.now(timezone.utc).isoformat(),
+                 "Explicit conversion requested by analyst. Verify period and vintage alignment.")
+            st.success("Normalized data added: "+new_key)
+        except Exception as exc:st.error("Normalization rejected: "+str(exc))
     with st.expander("Direct JSON multi-step operator plan"):
         default={"steps":[{"id":"change","operator":"first_difference","inputs":[names[0]]}],
                  "result_id":"change"}

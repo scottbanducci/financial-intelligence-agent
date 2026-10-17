@@ -38,10 +38,11 @@ class Dataset:
     feature_names: tuple[str,...]
     horizon: int
     metadata: Mapping[str,str]
+    label_dates: tuple[date,...] = ()
 
     def __post_init__(self):
         n=len(self.dates)
-        if n!=len(self.features) or n!=len(self.targets) or n<10:
+        if n!=len(self.features) or n!=len(self.targets) or n<10 or (self.label_dates and n!=len(self.label_dates)):
             raise ValueError("At least 10 complete aligned observations required")
         if any(self.dates[i]>=self.dates[i+1] for i in range(n-1)):
             raise ValueError("Dates must be strictly increasing")
@@ -71,7 +72,7 @@ def make_supervised(features: Mapping[str,Series], target: Series, horizon: int 
     target_points={p.date:p for p in target.select().points}
     feature_points={name:{p.date:p for p in s.select().points} for name,s in ordered.items()}
     dates=sorted(set(target_points).intersection(*(set(points) for points in feature_points.values())))
-    result_dates=[]; X=[]; y=[]
+    result_dates=[]; label_dates=[]; X=[]; y=[]
     for i in range(len(dates)-horizon):
         feature_date=dates[i]
         label_date=dates[i+horizon]
@@ -80,6 +81,7 @@ def make_supervised(features: Mapping[str,Series], target: Series, horizon: int 
         if target_value is None or any(v is None for v in feature_values):
             continue
         result_dates.append(feature_date)
+        label_dates.append(label_date)
         X.append(tuple(float(v) for v in feature_values))
         y.append(float(target_value))
     # Fixed horizon is measured in common-observation steps, not calendar days.
@@ -90,7 +92,7 @@ def make_supervised(features: Mapping[str,Series], target: Series, horizon: int 
         "target_key":target.key,
         "as_of_claim":"availability_verified" if coverage else "not_point_in_time_verified",
         "horizon_unit":"aligned_observations",
-    })
+    },tuple(label_dates))
 
 
 def _model(name: str, task: str):
@@ -162,7 +164,16 @@ def walk_forward(dataset: Dataset, *, algorithm: str, task: str = "regression",
         train_stop=initial_train+fold*test_size
         test_start=train_stop+gap
         test_stop=test_start+test_size
-        Xtrain=list(dataset.features[:train_stop]); ytrain=list(dataset.targets[:train_stop])
+        # Purge training labels whose actual target dates reach into the test
+        # feature window. This handles holes in features/targets, where a fixed
+        # row gap alone is insufficient to prevent overlap.
+        first_test=dataset.dates[test_start]
+        allowed=[i for i in range(train_stop)
+                 if not dataset.label_dates or dataset.label_dates[i] < first_test]
+        if len(allowed)<10:
+            raise ValueError("Purged training set has fewer than 10 rows")
+        Xtrain=[dataset.features[i] for i in allowed]
+        ytrain=[dataset.targets[i] for i in allowed]
         Xtest=list(dataset.features[test_start:test_stop]); ytest=list(dataset.targets[test_start:test_stop])
         if algorithm in {"last_value","historical_mean","majority_class"}:
             if algorithm=="last_value":
@@ -189,6 +200,8 @@ def walk_forward(dataset: Dataset, *, algorithm: str, task: str = "regression",
             "test_start":dataset.dates[test_start].isoformat(),
             "test_end":dataset.dates[test_stop-1].isoformat(),
             "train_rows":len(ytrain),"test_rows":len(ytest),"embargo_rows":gap,
+            "purged_training_rows":train_stop-len(allowed),
+            "train_last_label_date":max(dataset.label_dates[i] for i in allowed).isoformat() if dataset.label_dates else None,
         })
     def metrics(y,pred):
         if task=="classification":
@@ -213,4 +226,46 @@ def walk_forward(dataset: Dataset, *, algorithm: str, task: str = "regression",
             "Hyperparameters are fixed; no test-set fitting or parameter search.",
             "A horizon is a number of aligned observations, not calendar days.",
         ],
+    }
+
+
+def unsupervised_analysis(dataset: Dataset, *, algorithm: str, n_clusters: int = 3) -> dict[str,Any]:
+    """Bounded unsupervised research methods; fit does not use target values.
+
+    Unsupervised fitting on the entire historical fixture is descriptive, not an
+    out-of-sample anomaly detector or independently validated risk predictor.
+    """
+    if algorithm not in UNSUPERVISED:
+        raise ValueError("Unregistered unsupervised algorithm")
+    if type(n_clusters) is not int or not 2<=n_clusters<=8:
+        raise ValueError("Cluster count must be in [2,8]")
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.decomposition import PCA
+    from sklearn.cluster import KMeans,DBSCAN
+    from sklearn.ensemble import IsolationForest
+    import numpy as np
+    if len(dataset.features)>10000:
+        raise ValueError("Sample limit exceeded")
+    X=StandardScaler().fit_transform(np.asarray(dataset.features,dtype=float))
+    if algorithm=="pca":
+        model=PCA(n_components=min(2,X.shape[1],len(X)),svd_solver="full")
+        transformed=model.fit_transform(X)
+        return {
+            "algorithm":algorithm,"observations":len(X),
+            "explained_variance_ratio":[float(v) for v in model.explained_variance_ratio_],
+            "first_rows":transformed[:20].tolist(),
+            "feature_names":dataset.feature_names,
+            "warning":"Descriptive in-sample component analysis; no predictive claim.",
+        }
+    if algorithm=="kmeans":
+        labels=KMeans(n_clusters=n_clusters,random_state=SEED,n_init=10).fit_predict(X)
+    elif algorithm=="dbscan":
+        labels=DBSCAN(eps=0.75,min_samples=5).fit_predict(X)
+    else:
+        labels=IsolationForest(n_estimators=80,contamination=0.08,random_state=SEED,n_jobs=1).fit_predict(X)
+    return {
+        "algorithm":algorithm,"observations":len(X),
+        "label_counts":{str(int(k)):int(sum(labels==k)) for k in sorted(set(labels))},
+        "first_labels":[int(v) for v in labels[:20]],
+        "warning":"In-sample descriptive clusters/anomalies; no return prediction or live alert.",
     }

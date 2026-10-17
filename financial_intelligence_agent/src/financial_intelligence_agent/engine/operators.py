@@ -8,7 +8,7 @@ No eval, dynamic Python, arbitrary SQL or forward fills.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, localcontext
 from math import log, sqrt, exp
 from statistics import median
@@ -225,6 +225,8 @@ def execute(name: str, *sources: Series, window: int = 5, periods_per_year: int 
         raise ValueError("Incompatible observation conventions")
     if name in SAME_UNITS and len(sources) == 2 and sources[0].unit != sources[1].unit:
         raise ValueError("Incompatible units; explicit conversion required")
+    if name in {"spread_basis_points", "basis_point_change"} and sources[0].unit != "percent":
+        raise ValueError("Basis-point conversion requires percent-valued input")
     resolved = [s.select(as_of) for s in sources]
     reference = {p.date: p for p in resolved[0].points}
     other = {p.date: p for p in resolved[1].points} if len(resolved) == 2 else {}
@@ -319,9 +321,20 @@ def execute(name: str, *sources: Series, window: int = 5, periods_per_year: int 
                         v = sum(values)/len(values)
                     elif name in {"first_difference","percent_change","basis_point_change","log_return","second_difference",
                                   "year_over_year_change","year_over_year_percent"}:
-                        lag = {"year_over_year_change": {"monthly":12,"quarterly":4,"annual":1,"weekly":52,"daily":365},
-                               "year_over_year_percent": {"monthly":12,"quarterly":4,"annual":1,"weekly":52,"daily":365}}.get(name,{}).get(sources[0].frequency,1)
-                        prev = left[i-lag] if i>=lag else None
+                        if name.startswith("year_over_year"):
+                            if sources[0].frequency == "irregular":
+                                raise ValueError("Year-over-year change requires explicit frequency")
+                            if sources[0].frequency == "weekly":
+                                comparison = d - timedelta(days=364)
+                            else:
+                                try:
+                                    comparison = d.replace(year=d.year-1)
+                                except ValueError:
+                                    comparison = d.replace(year=d.year-1,day=28)
+                            baseline = reference.get(comparison)
+                            prev = baseline.value if baseline else None
+                        else:
+                            prev = left[i-1] if i else None
                         if name == "second_difference": prev = None
                         if name == "second_difference" and i>=2 and left[i-1] is not None and left[i-2] is not None:
                             v = a-2*left[i-1]+left[i-2]
@@ -336,9 +349,14 @@ def execute(name: str, *sources: Series, window: int = 5, periods_per_year: int 
             v = None
         first = reference[d]
         second = other.get(d)
-        available = first.available_at
-        if second:
-            available = max(first.available_at, second.available_at) if first.available_at and second.available_at else None
+        # Conservatively include all earlier dependencies; if any publication
+        # timestamp is unknown, derived availability must remain unknown.
+        # This may overstate latency but cannot accidentally backdate a result.
+        depends = list(reference[k] for k in dates[:i+1])
+        if other:
+            depends += [other[k] for k in dates[:i+1]]
+        known = [p.available_at for p in depends]
+        available = max(known) if all(x is not None for x in known) else None
         result.append(Point(d,v,available))
     unit = sources[0].unit
     if name in PERCENT_UNITS: unit = "percent"

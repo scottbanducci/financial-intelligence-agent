@@ -167,7 +167,13 @@ def fetch_json(url: str, *, allowed_hostname: str, timeout_seconds: float = 10.0
     if not 0 < timeout_seconds <= 30 or not 0 < max_bytes <= 5_000_000:
         raise ValueError("Invalid fetch limits")
     req=Request(url,headers={"User-Agent":"financial-intelligence-agent/0.2","Accept":"application/json"})
-    with urlopen(req,timeout=timeout_seconds) as resp:
+    # Reject all redirects, which could otherwise evade initial host checking.
+    from urllib.request import build_opener, HTTPRedirectHandler
+    class RejectRedirect(HTTPRedirectHandler):
+        def redirect_request(self,req,fp,code,msg,headers,newurl):
+            raise ValueError("Cross-origin or unexpected redirect denied")
+    opener=build_opener(RejectRedirect)
+    with opener.open(req,timeout=timeout_seconds) as resp:
         raw=resp.read(max_bytes+1)
     if len(raw)>max_bytes:
         raise ValueError("Response size limit exceeded")

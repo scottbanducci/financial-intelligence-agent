@@ -16,6 +16,7 @@ import streamlit as st
 from financial_intelligence_agent.live.fdic import bank_financial,FIELDS
 from financial_intelligence_agent.live.providers import (
     catalog,fetch_series,dealer_catalog,Descriptor,FetchResult,FRED_PRESETS)
+from financial_intelligence_agent.live.workspaces import export_workspace,import_workspace
 from financial_intelligence_agent.live.charts import (
     ChartSpec,prepare,interactive_chart,image_bytes,csv_bytes,metadata_bytes,MODES,STYLES)
 from financial_intelligence_agent.engine.operators import Series,execute,OPERATOR_SPECS
@@ -320,6 +321,22 @@ def render():
                   "Retrieved":v["retrieved"][:19]} for k,v in ws.items()]
         st.dataframe(pd.DataFrame(summary),hide_index=True,use_container_width=True)
         with st.expander("Manage datasets and transformations"):
+            st.markdown("##### Portable research workspace")
+            st.caption("Save an auditable portable copy of your data and source metadata. No API credentials are stored.")
+            try:
+                st.download_button("Download workspace JSON",export_workspace(ws),
+                                   file_name="liquidity-research-workspace.json",
+                                   mime="application/json",key="save_research_workspace")
+            except Exception as exc:st.warning("Cannot export workspace: "+str(exc))
+            uploaded=st.file_uploader("Restore a previously exported workspace",type=["json"],
+                                      key="restore_research_workspace")
+            if uploaded is not None and st.button("Restore verified workspace",key="restore_confirm"):
+                try:
+                    recovered=import_workspace(uploaded.getvalue())
+                    if len(recovered)>80:raise ValueError("Workspace series limit exceeded")
+                    st.session_state["analyst_workspace"]=recovered
+                    st.rerun()
+                except Exception as exc:st.error("Restore rejected: "+str(exc))
             remove=st.multiselect("Remove series from this session",list(ws),key="remove_series")
             if st.button("Remove selected"):
                 for key in remove:ws.pop(key,None)

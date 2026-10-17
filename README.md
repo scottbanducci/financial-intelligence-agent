@@ -12,7 +12,7 @@ an extensible data-provider interface and bounded LLM/ML workflows.**
 ## Functional overview
 
 **Live Data Studio** — Search FRED's catalog with a user/server key, fetch
-NY Fed money-market rates and hundreds of published primary-dealer aggregates,
+NY Fed money-market rates, published primary-dealer aggregates and bounded additional Markets API endpoint mappings (including repo operations),
 query FDIC banking statistics, derive bank-level credit contraction breadth,
 load your Databricks Gold H.4.1/H.8/rates tables with read-only permissions
 or import FFIEC tabular bulk data and arbitrary CSV.

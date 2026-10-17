@@ -232,7 +232,9 @@ def _load_nyfed_other():
     if not columns:return
     x,y,z=st.columns(3)
     date_col=x.selectbox("Observation date column",columns,index=columns.index("operationDate") if "operationDate" in columns else 0,key="nyfed_date_col")
-    numeric_col=y.selectbox("Numeric value column",columns,index=columns.index("value") if "value" in columns else 0,key="nyfed_value_col")
+    suggested=next((field for field in ("totalAmtAccepted","value","percentRate","totalAmtSubmitted","amount")
+                    if field in columns),columns[0])
+    numeric_col=y.selectbox("Numeric value column",columns,index=columns.index(suggested),key="nyfed_value_col")
     units=z.text_input("Exact source unit",value="source-native (verify publisher)",key="nyfed_unit")
     freq=st.selectbox("Data frequency",["daily","weekly","monthly","quarterly","annual","irregular"],key="nyfed_frequency")
     name=st.text_input("Workspace series ID",value="NYFED_CUSTOM",key="nyfed_custom_name")

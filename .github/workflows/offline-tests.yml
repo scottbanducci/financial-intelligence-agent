@@ -22,7 +22,7 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p 'test_*.py' -v
-      - name: Six-page Streamlit rendering smoke test
+      - name: Seven-page UI and chart-render integration checks
         run: |
           python - <<'PY'
           from streamlit.testing.v1 import AppTest
@@ -32,6 +32,24 @@ jobs:
               app.sidebar.radio[0].set_value(target).run()
               if app.exception: raise AssertionError(target+": "+str(app.exception))
               print("Render succeeded:",target)
+          # Exercise chart studio with actual typed synthetic series; this
+          # does not issue any external provider queries or use a secret.
+          from financial_intelligence_agent.engine.operators import Series,Point
+          from financial_intelligence_agent.live.providers import Descriptor
+          from datetime import date
+          x=Series("test_sofr","FRED","percent","daily",
+                   tuple(Point(date(2026,10,i+1),3.80+i/100) for i in range(8)))
+          y=Series("test_effr","NYFED","percent","daily",
+                   tuple(Point(date(2026,10,i+1),3.90+i/100) for i in range(8)))
+          dx=Descriptor("FRED:SOFR","SOFR","FRED","percent","daily","rates","https://fred.stlouisfed.org/series/SOFR")
+          dy=Descriptor("NYFED:EFFR","EFFR","NYFED","percent","daily","rates","https://markets.newyorkfed.org/api/rates")
+          app.session_state["analyst_workspace"]={
+              "test_sofr":{"series":x,"descriptor":dx,"retrieved":"fixture-test","warning":""},
+              "test_effr":{"series":y,"descriptor":dy,"retrieved":"fixture-test","warning":""},
+          }
+          app.sidebar.radio[0].set_value("Live Data Studio").run()
+          if app.exception: raise AssertionError("Chart Studio loaded data: "+str(app.exception))
+          print("Interactive Chart Studio renders with two typed time series")
           PY
       - name: Build deployable OCI container
         run: docker build --progress=plain -t liquidity-workbench:test -f Dockerfile .

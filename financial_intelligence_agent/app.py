@@ -1,5 +1,7 @@
 """Historical liquidity research UI with provider-neutral operator and ML labs."""
 import sys
+import os
+import hmac
 from pathlib import Path
 import pandas as pd
 import streamlit as st
@@ -16,6 +18,21 @@ from financial_intelligence_agent.live.studio import render as live_studio
 import json
 
 st.set_page_config(page_title="Market Liquidity | Research Workbench",layout="wide",page_icon="◈")
+# Optional SINGLE-PASSWORD gate for a private preview only. This is NOT
+# multitenant SSO, billing authentication or protection against brute force.
+preview_secret=os.getenv("ANALYST_DEMO_PASSWORD","")
+if preview_secret and not st.session_state.get("demo_access_granted",False):
+    st.title("Liquidity Intelligence · Private preview")
+    supplied=st.text_input("Preview password",type="password",key="demo_access_input")
+    if st.button("Enter preview"):
+        if hmac.compare_digest(supplied,preview_secret):
+            st.session_state["demo_access_granted"]=True
+            st.rerun()
+        else:
+            st.error("Invalid preview password")
+    st.caption("Prototype preview gate. Production subscriptions require managed SSO and tenant authorization.")
+    st.stop()
+
 st.markdown("""
 <style>
 .stApp{background:radial-gradient(ellipse 80% 30% at 90% 0%,#15566630,transparent),#0c1625;color:#e7eff7}
@@ -47,9 +64,12 @@ def header(section,title,description):
 engine=make_engine()
 st.sidebar.markdown("### ◈ LIQUIDITY INTELLIGENCE")
 st.sidebar.caption("EXPERIMENTAL / RESEARCH WORKBENCH")
-page=st.sidebar.radio("Workspace",["Command center","Live Data Studio","Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"])
+page=st.sidebar.radio("Workspace",["Live Data Studio","Command center","Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"])
 st.sidebar.divider()
-st.sidebar.error("HISTORICAL FIXTURE\n\nCutoff: 2026-10-10. Not live, not vintage-verified.")
+if page=="Live Data Studio":
+    st.sidebar.success("LIVE ON-DEMAND SOURCES\n\nFRED · NY Fed · FDIC · Databricks Gold, where configured.")
+else:
+    st.sidebar.warning("HISTORICAL REFERENCE FIXTURE\n\nOct 2026 snapshot; not live.")
 st.sidebar.caption(f'{len(OPERATOR_SPECS)} deterministic operators · {len(ALGORITHMS)} registered ML algorithms')
 st.sidebar.link_button("GitHub branch ↗","https://github.com/scottbanducci/financial-intelligence-agent/tree/experiment/market-liquidity-launch")
 
@@ -197,19 +217,44 @@ elif page=="Analyst agent":
                 st.error("Model planning unavailable: "+str(exc))
 
 else:
-    header("06 / Source contracts","Data catalog & provenance",
-           "Multiple providers, one analytical contract. Ingestion mappings are not equivalent to live connectors.")
-    catalog=[
-        ("FRED / ALFRED","Observation JSON with real-time vintages","Parser implemented; no scheduled fetch"),
-        ("New York Fed","Explicit mapped JSON record path","Parser implemented; schema mapping required"),
-        ("FFIEC CDR","Institution and line-item tabular extracts","Parser implemented; bulk file required"),
-        ("Generic CSV","Allowlisted date/value columns","Local parser implemented"),
+    from financial_intelligence_agent.live.providers import catalog as public_catalog
+    from financial_intelligence_agent.live.databricks_gold import descriptors as gold_catalog
+    header("07 / Data inventory","Source catalog and provenance",
+           "Discover supported published series; live source coverage is distinct from the fixed tutorial fixture.")
+    st.markdown("#### Analyst-accessible published series")
+    rows=[{"Provider":d.provider,"Series ID":d.id,"Description":d.label,
+           "Unit":d.unit,"Frequency":d.frequency,"Publication source":d.source_url}
+          for d in public_catalog()]
+    try:
+        rows.extend({"Provider":d.provider,"Series ID":d.id,"Description":d.label,
+                     "Unit":d.unit,"Frequency":d.frequency,"Publication source":d.source_url}
+                    for d in gold_catalog(os.getenv("DATABRICKS_CATALOG","fed_monitor")))
+    except ValueError:
+        pass
+    filter_text=st.text_input("Filter catalog",placeholder="SOFR, reserves, bank credit...")
+    listed=pd.DataFrame(rows)
+    if filter_text.strip():
+        listed=listed[listed.astype(str).apply(
+            lambda col:col.str.contains(filter_text.strip(),case=False,regex=False)).any(axis=1)]
+    st.dataframe(listed,hide_index=True,use_container_width=True,height=370)
+    st.caption("The published NY Fed dealer catalog contains additional dynamically discovered identifiers; load it in Live Data Studio. FRED also supports full catalog search using a key.")
+    st.subheader("Source connection states")
+    providers=[
+        ("FRED / ALFRED","Live FRED search and current observations","Requires FRED_API_KEY or per-user key; PIT revisions incomplete"),
+        ("NY Fed Rates","Live verified public Markets API","Funding reference rates available without a standard key"),
+        ("NY Fed Dealers","Live verified dealer discovery and sample history","1,539 publisher series entries found during a live probe"),
+        ("FDIC","Live verified bank-level reports and panels","Bank merges, units, filing revisions require care"),
+        ("FFIEC CDR","Bulk tab-delimited import","Automatic raw CDR download not deployed"),
+        ("Databricks Gold","Allowlisted read-only SQL adapter","Warehouse and permissions must be configured"),
+        ("Analyst uploads","CSV/FFIEC import","User supplied metadata not independently audited"),
     ]
-    st.dataframe(pd.DataFrame(catalog,columns=["Provider","Contract","Live status"]),hide_index=True,use_container_width=True)
+    st.dataframe(pd.DataFrame(providers,columns=["Provider","Access","Important limitation"]),hide_index=True,use_container_width=True)
+    st.subheader("Tutorial fixture freshness")
     fresh=engine.invoke("get_data_freshness")
-    st.dataframe(pd.DataFrame([{"Fixture":key,**val} for key,val in fresh["sources"].items()]),hide_index=True,use_container_width=True)
-    st.markdown("**Quality invariants:** strict unit checks, exact-date alignment, no implicit frequency resampling, no silent missing-value imputation, and as-of filtering that excludes records lacking availability metadata.")
-    st.caption("Macro fingerprint "+engine.macro.id)
-    st.caption("Rates fingerprint "+engine.rates.snapshot_id)
-    with st.expander("Original bounded agent tool catalog"):
-        st.table(pd.DataFrame([{"Tool":k,"Description":v} for k,v in TOOLS.items()]))
+    st.dataframe(pd.DataFrame([{"Fixture":key,**val} for key,val in fresh["sources"].items()]),
+                 hide_index=True,use_container_width=True)
+    st.markdown("**Data-quality contract:** explicit units, exact date alignment, explicit frequency transformations, missing values never imputed silently, and no invented publication vintages.")
+    st.caption("Macro tutorial fingerprint "+engine.macro.id)
+    st.caption("Funding tutorial fingerprint "+engine.rates.snapshot_id)
+    with st.expander("Original bounded agent tools"):
+        st.table(pd.DataFrame([{"Tool":k,"Purpose":v} for k,v in TOOLS.items()]))

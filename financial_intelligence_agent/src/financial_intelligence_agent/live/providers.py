@@ -112,7 +112,12 @@ def validate_dates(start: str, end: str) -> tuple[date,date]:
 
 def _get(url: str, host: str, fetch: Callable[...,dict]|None) -> dict:
     reader=fetch or fetch_json
-    return reader(url,allowed_hostname=host,timeout_seconds=15,max_bytes=5_000_000)
+    try:
+        return reader(url,allowed_hostname=host,timeout_seconds=15,max_bytes=5_000_000)
+    except Exception as exc:
+        # HTTPError and URL exceptions can embed the FRED API key in the URL.
+        # No exception text or exception chaining can reach a public UI/log.
+        raise ValueError("Publisher request failed or timed out; check credentials, upstream availability and series ID") from None
 
 
 def _unique(key: str, provider: str, unit: str, frequency: str,

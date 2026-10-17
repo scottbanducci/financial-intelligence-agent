@@ -1,6 +1,7 @@
 """Contract tests use deterministic injected HTTP responses; never network."""
 import sys
 import unittest
+from decimal import Decimal
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
@@ -35,7 +36,7 @@ class ProviderTests(unittest.TestCase):
         r=fetch_series("NYFED:SOFR","2026-10-01","2026-10-02",fetch=mock)
         self.assertEqual(len(r.series.points),2)
         self.assertIsNone(r.series.points[0].available_at)
-        self.assertEqual(r.series.points[1].value,3.85)
+        self.assertEqual(r.series.points[1].value,Decimal('3.85'))
     def test_dealer_dynamic_catalog_and_mapping(self):
         def catalog_mock(*a,**kw):
             return {"pd":{"timeseries":[{"keyid":"PDPOSGST-TOT","description":"Treasury positions"}]}}

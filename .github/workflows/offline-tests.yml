@@ -33,6 +33,8 @@ jobs:
               if app.exception: raise AssertionError(target+": "+str(app.exception))
               print("Render succeeded:",target)
           PY
+      - name: Build deployable OCI container
+        run: docker build --progress=plain -t liquidity-workbench:test -f Dockerfile .
       - name: Advisory live publisher contract probe
         continue-on-error: true
         env:

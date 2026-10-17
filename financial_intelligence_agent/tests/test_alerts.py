@@ -12,7 +12,7 @@ class Alerts(unittest.TestCase):
              Point("2026-10-03",4.10)))
     def test_cross_and_freshness(self):
         r=evaluate(Rule("Rate shock","SOFR","crosses_above",Decimal("4.0")),self.s,
-                   expected_max_staleness_days=30,as_of=None)
+                   expected_max_staleness_days=30,as_of=None,evaluation_date="2026-11-16")
         self.assertTrue(r["triggered"])
         self.assertEqual(r["comparison_value"],"3.9")
         self.assertTrue(r["stale"])

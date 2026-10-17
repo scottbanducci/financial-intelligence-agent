@@ -17,8 +17,8 @@ from financial_intelligence_agent.engine.adapters import fetch_json
 from financial_intelligence_agent.live.providers import validate_dates
 from financial_intelligence_agent.live.fdic import FDIC_URL
 
-PAGE=1000
-MAX_RECORDS=40000
+PAGE=2000
+MAX_RECORDS=120000
 
 @dataclass(frozen=True)
 class BankDatum:
@@ -37,7 +37,7 @@ class Panel:
         if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,19}",self.field):
             raise ValueError("Invalid panel field")
         if not self.records or len(self.records)>MAX_RECORDS:
-            raise ValueError("Panel requires 1..40000 records")
+            raise ValueError("Panel requires 1..120000 records")
         keys=[(v.cert,v.date) for v in self.records]
         if len(keys)!=len(set(keys)):
             raise ValueError("Duplicate institution and report date")
@@ -66,7 +66,7 @@ def fetch_bank_panel(field:str,start:str,end:str,*,fetch:Callable[...,dict]|None
             raise ValueError("Incomplete FDIC panel response")
         page_total=int(payload["meta"].get("total",-1))
         if page_total<0 or page_total>MAX_RECORDS:
-            raise ValueError("FDIC panel size exceeds 40,000 rows; narrow date range")
+            raise ValueError("FDIC panel size exceeds 120,000 rows; narrow date range")
         if total is None:total=page_total
         elif total!=page_total:
             raise ValueError("FDIC source changed across pagination; retry with snapshot")

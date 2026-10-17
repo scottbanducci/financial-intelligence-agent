@@ -33,7 +33,8 @@ class Rule:
 
 
 def evaluate(rule:Rule,series:Series,*,as_of:date|str|None=None,
-             expected_max_staleness_days:int=14)->dict[str,Any]:
+             expected_max_staleness_days:int=14,
+             evaluation_date:date|str|None=None)->dict[str,Any]:
     if rule.key!=series.key:
         raise ValueError("Series key does not match rule")
     if type(expected_max_staleness_days) is not int or not 0<=expected_max_staleness_days<=365:
@@ -63,7 +64,9 @@ def evaluate(rule:Rule,series:Series,*,as_of:date|str|None=None,
         else:
             trigger=(recent.value-past.value)<rule.threshold
         explanation="Compared two observed values separated by "+str(rule.horizon)+" non-null observations"
-    checked=cutoff or date.today()
+    # Freshness checks use a separate evaluation clock, not the as-of/vintage
+    # selection date. This enables reproducible historical alert tests.
+    checked=day(evaluation_date) or cutoff or date.today()
     age=(checked-recent.date).days
     return {
         "rule":{"name":rule.name,"series":rule.key,"condition":rule.condition,

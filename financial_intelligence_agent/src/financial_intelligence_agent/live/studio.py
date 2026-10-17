@@ -172,7 +172,7 @@ def _load_breadth():
     st.caption("Download matched institution quarterly financials and calculate the fraction of banks with YoY declines. This is a true cross-bank measure, not category breadth.")
     field=st.selectbox("Bank metric",["LNLSGR","DEP","ASSET","LNLSNET","NETINC"],
                       format_func=lambda code:FIELDS.get(code,code),key="panel_field")
-    years=st.slider("Quarterly lookback (years)",2,5,3,key="panel_years")
+    years=st.slider("Quarterly lookback (years)",2,5,2,key="panel_years")
     if st.button("Fetch population and calculate breadth",key="fetch_breadth"):
         try:
             with st.spinner("Paging FDIC bank-level reports; this may require many requests"):

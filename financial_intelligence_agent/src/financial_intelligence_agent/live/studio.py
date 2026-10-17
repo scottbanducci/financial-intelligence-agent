@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from financial_intelligence_agent.live.nyfed_explorer import discover as discover_nyfed,records_from_path,map_series
 from financial_intelligence_agent.live.panels import fetch_bank_panel,contraction_breadth
 from financial_intelligence_agent.live.databricks_gold import read_gold,descriptors as gold_descriptors
 from financial_intelligence_agent.live.fdic import bank_financial,FIELDS
@@ -190,6 +191,67 @@ def _load_breadth():
             st.dataframe(pd.DataFrame(report["table"]),hide_index=True,use_container_width=True)
             for limitation in report["limitations"]:st.caption(limitation)
         except Exception as exc:st.error("Panel analysis unavailable: "+str(exc))
+
+def _load_nyfed_other():
+    st.markdown("#### Other NY Fed Markets API datasets")
+    st.caption("Public REST JSON explorer for repo/reverse-repo, securities lending, SOMA, primary-dealer and other publisher API families. Map date, measure, filter and same-day aggregation explicitly.")
+    examples={
+       "Repo / reverse repo operation results":"rp/results/search.json",
+       "Custom documented Markets API path":""
+    }
+    chosen=st.selectbox("Endpoint template",list(examples),key="nyfed_explorer_kind")
+    manual=st.text_input("Relative API path (.json, no host)",
+                         value=examples[chosen],key="nyfed_explorer_path")
+    one,two=st.columns(2)
+    start=one.date_input("From",date.today()-timedelta(days=30),key="nyfed_api_start")
+    end=two.date_input("Through",date.today(),key="nyfed_api_end")
+    use_dates=st.checkbox("Include startDate/endDate filter",value=True,key="nyfed_api_dates")
+    if st.button("Discover NY Fed JSON fields",key="discover_api_fields"):
+        try:
+            dataset=discover_nyfed(manual,start=start.isoformat() if use_dates else None,
+                                   end=end.isoformat() if use_dates else None)
+            st.session_state["nyfed_explorer_payload"]=dataset
+            st.success("Discovered "+str(len(dataset.candidate_paths))+" record arrays")
+        except Exception as exc:st.error("NY Fed endpoint unsupported: "+str(exc))
+    data=st.session_state.get("nyfed_explorer_payload")
+    if data is None:return
+    st.caption("Publisher endpoint: "+data.endpoint+" · fetched "+data.fetched_at)
+    if not data.candidate_paths:
+        st.warning("No arrays of JSON objects found. This endpoint may be summary-only or need a specific publisher parameter.")
+        with st.expander("Response shape"):
+            st.json({"keys":list(data.payload),"types":{k:type(v).__name__ for k,v in data.payload.items()}})
+        return
+    candidate=st.selectbox("Published record array",data.candidate_paths,key="nyfed_api_path")
+    try:
+        records=records_from_path(data,candidate)
+    except Exception as exc:st.error("Record mapping unavailable: "+str(exc));return
+    if not records:return
+    columns=sorted(set().union(*(set(row) for row in records[:50])))
+    st.caption("Source records: "+str(len(records))+"; preview 10 records; values are not normalized until mapped.")
+    st.dataframe(pd.DataFrame(records[:10]),use_container_width=True,hide_index=True)
+    if not columns:return
+    x,y,z=st.columns(3)
+    date_col=x.selectbox("Observation date column",columns,index=columns.index("operationDate") if "operationDate" in columns else 0,key="nyfed_date_col")
+    numeric_col=y.selectbox("Numeric value column",columns,index=columns.index("value") if "value" in columns else 0,key="nyfed_value_col")
+    units=z.text_input("Exact source unit",value="source-native (verify publisher)",key="nyfed_unit")
+    freq=st.selectbox("Data frequency",["daily","weekly","monthly","quarterly","annual","irregular"],key="nyfed_frequency")
+    name=st.text_input("Workspace series ID",value="NYFED_CUSTOM",key="nyfed_custom_name")
+    agg=st.selectbox("Records sharing one date",["reject","sum","mean","last"],key="nyfed_same_day_policy")
+    filter_col=st.selectbox("Optional field filter",["(none)",*columns],key="nyfed_filter_col")
+    filter_val=st.text_input("Exact value to retain",key="nyfed_filter_val") if filter_col!="(none)" else None
+    if st.button("Validate and map to an analytical series",key="nyfed_map_series"):
+        try:
+            mapped=map_series(data,path=candidate,key=name,date_field=date_col,value_field=numeric_col,
+                              unit=units,frequency=freq,aggregation=agg,
+                              filter_field=None if filter_col=="(none)" else filter_col,
+                              filter_value=filter_val)
+            desc=Descriptor("NYFED_API:"+name,name+" ("+data.endpoint+")","NYFED",
+                  units,freq,"Mapped NY Fed Markets API",data.endpoint,"unverified_generic_publisher_date")
+            _add(name,mapped,desc,data.fetched_at,
+                 "User-configured mapping; publisher units, break dates and record deduplication must be verified")
+            st.success("Added "+str(len(mapped.points))+" normalized dates; now chartable and exportable")
+        except Exception as exc:st.error("Field mapping rejected: "+str(exc))
+
 
 def _load_upload():
     st.markdown("#### Import tabular research data")
@@ -395,13 +457,14 @@ def render():
     st.info("Live mode fetches upstream API data on demand. Publisher release dates and data vintages are not guaranteed. "
             "Never treat this as a real-time trading feed.")
     with st.expander("Data acquisition",expanded=not bool(_state())):
-        tab1,tab2,tab3,tab4,tab5,tab6=st.tabs(["FRED + NY Fed rates","Primary dealers","FDIC bank financials","Bank contraction breadth","Databricks Gold","FFIEC / CSV upload"])
+        tab1,tab2,tab3,tab4,tab5,tab6,tab7=st.tabs(["FRED + NY Fed rates","Primary dealers","Other NY Fed APIs","FDIC bank financials","Bank contraction breadth","Databricks Gold","FFIEC / CSV upload"])
         with tab1:_load_public_series()
         with tab2:_load_dealers()
-        with tab3:_load_fdic()
-        with tab4:_load_breadth()
-        with tab5:_load_gold()
-        with tab6:_load_upload()
+        with tab3:_load_nyfed_other()
+        with tab4:_load_fdic()
+        with tab5:_load_breadth()
+        with tab6:_load_gold()
+        with tab7:_load_upload()
     ws=_state()
     if ws:
         st.subheader("Working data catalog")

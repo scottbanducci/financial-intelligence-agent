@@ -4,3 +4,5 @@ scikit-learn>=1.4,<2
 openai>=1.50,<3
 plotly>=5.22,<7
 matplotlib>=3.8,<4
+databricks-sdk>=0.40,<1
+databricks-sql-connector>=4,<5

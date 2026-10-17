@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from financial_intelligence_agent.live.databricks_gold import read_gold,descriptors as gold_descriptors
 from financial_intelligence_agent.live.fdic import bank_financial,FIELDS
 from financial_intelligence_agent.live.providers import (
     catalog,fetch_series,dealer_catalog,Descriptor,FetchResult,FRED_PRESETS)
@@ -140,6 +141,29 @@ def _load_fdic():
         except Exception as exc:
             st.error("FDIC query rejected: "+str(exc))
     st.caption("Bank metrics can use different accounting units. Verify unit definitions from FDIC before comparing or transforming.")
+
+def _load_gold():
+    st.markdown("#### Governed Databricks Gold tables")
+    st.caption("Read-only queries against existing H.4.1, H.8 and funding-rate Gold tables. No generated SQL is accepted.")
+    catalog=os.getenv("DATABRICKS_CATALOG","fed_monitor")
+    http_path=os.getenv("DATABRICKS_HTTP_PATH","")
+    if not http_path:
+        st.warning("Set DATABRICKS_HTTP_PATH and DATABRICKS_CATALOG in App environment; SQL warehouse compute is billable.")
+        return
+    try: descriptions=gold_descriptors(catalog)
+    except ValueError as exc:st.error(str(exc));return
+    chosen=st.selectbox("Gold metric",descriptions,format_func=lambda d:d.category+" · "+d.label)
+    c1,c2=st.columns(2)
+    a=c1.date_input("Gold from",date.today()-timedelta(days=365*3),key="gold_begin")
+    b=c2.date_input("Gold through",date.today(),key="gold_end")
+    if st.button("Query governed Gold (read only)"):
+        try:
+            _,table,field=chosen.id.split(":")
+            with st.spinner("Reading Databricks warehouse"):
+                result=read_gold(table,field,a.isoformat(),b.isoformat(),catalog=catalog)
+            _add(chosen.id,result.series,result.descriptor,result.retrieved_at,result.warning)
+            st.success("Loaded "+str(len(result.series.points))+" Gold observations")
+        except Exception as exc:st.error("Gold query unavailable: "+str(exc))
 
 def _load_upload():
     st.markdown("#### Import tabular research data")
@@ -306,11 +330,12 @@ def render():
     st.info("Live mode fetches upstream API data on demand. Publisher release dates and data vintages are not guaranteed. "
             "Never treat this as a real-time trading feed.")
     with st.expander("Data acquisition",expanded=not bool(_state())):
-        tab1,tab2,tab3,tab4=st.tabs(["FRED + NY Fed rates","Primary dealers","FDIC bank financials","FFIEC / CSV upload"])
+        tab1,tab2,tab3,tab4,tab5=st.tabs(["FRED + NY Fed rates","Primary dealers","FDIC bank financials","Databricks Gold","FFIEC / CSV upload"])
         with tab1:_load_public_series()
         with tab2:_load_dealers()
         with tab3:_load_fdic()
-        with tab4:_load_upload()
+        with tab4:_load_gold()
+        with tab5:_load_upload()
     ws=_state()
     if ws:
         st.subheader("Working data catalog")

@@ -51,6 +51,14 @@ class HardeningTests(unittest.TestCase):
         b=make_source([1,2,3,4],public=False)
         self.assertIsNone(execute("rolling_mean",b,window=2).points[-1].available_at)
 
+    def test_simple_operator_does_not_inherit_unrelated_missing_publication(self):
+        dates=[date(2025,1,1),date(2025,1,2)]
+        a=Series("A","TEST","percent","daily",(Point(dates[0],1),
+                  Point(dates[1],2,date(2025,1,3))))
+        out=execute("identity",a)
+        self.assertIsNone(out.points[0].available_at)
+        self.assertEqual(out.points[1].available_at,date(2025,1,3))
+
     def test_purge_uses_actual_target_dates(self):
         days=[date(2025,1,1)+timedelta(days=i) for i in range(110)]
         feats=Series("X","TEST","value","daily",tuple(Point(d,i if i%3 else None) for i,d in enumerate(days)))

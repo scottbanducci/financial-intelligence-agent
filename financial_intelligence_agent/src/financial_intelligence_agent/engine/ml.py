@@ -42,7 +42,7 @@ class Dataset:
 
     def __post_init__(self):
         n=len(self.dates)
-        if n!=len(self.features) or n!=len(self.targets) or n<10 or (self.label_dates and n!=len(self.label_dates)):
+        if n!=len(self.features) or n!=len(self.targets) or n<10 or n!=len(self.label_dates):
             raise ValueError("At least 10 complete aligned observations required")
         if any(self.dates[i]>=self.dates[i+1] for i in range(n-1)):
             raise ValueError("Dates must be strictly increasing")
@@ -90,7 +90,7 @@ def make_supervised(features: Mapping[str,Series], target: Series, horizon: int 
     return Dataset(tuple(result_dates),tuple(X),tuple(y),tuple(ordered),horizon,{
         "frequency":target.frequency,
         "target_key":target.key,
-        "as_of_claim":"availability_verified" if coverage else "not_point_in_time_verified",
+        "as_of_claim":"release_dates_recorded_not_audited" if coverage else "not_point_in_time_verified",
         "horizon_unit":"aligned_observations",
     },tuple(label_dates))
 

@@ -349,12 +349,36 @@ def execute(name: str, *sources: Series, window: int = 5, periods_per_year: int 
             v = None
         first = reference[d]
         second = other.get(d)
-        # Conservatively include all earlier dependencies; if any publication
-        # timestamp is unknown, derived availability must remain unknown.
-        # This may overstate latency but cannot accidentally backdate a result.
-        depends = list(reference[k] for k in dates[:i+1])
+        # Propagate the publication dates of the *actual dependency window*.
+        # Prior versions always scanned the full prefix: that was quadratic
+        # and incorrectly tainted independent single-date transformations.
+        prefix_ops = {"cumulative_sum","cumulative_product","running_max",
+                      "running_min","drawdown_percent","expanding_mean","ema"}
+        change_ops = {"first_difference","percent_change",
+                      "basis_point_change","log_return"}
+        if name in prefix_ops:
+            starts = 0
+        elif name in ROLLING or name.startswith("rolling_"):
+            starts = max(0,i-window+1)
+        elif name == "second_difference":
+            starts = max(0,i-2)
+        elif name in change_ops:
+            starts = max(0,i-1)
+        else:
+            starts = i
+        depends = [reference[dates[j]] for j in range(starts,i+1)]
         if other:
-            depends += [other[k] for k in dates[:i+1]]
+            depends.extend(other[dates[j]] for j in range(starts,i+1))
+        if name.startswith("year_over_year") and i>0:
+            if sources[0].frequency=="weekly":
+                comparison=d-timedelta(days=364)
+            else:
+                try:
+                    comparison=d.replace(year=d.year-1)
+                except ValueError:
+                    comparison=d.replace(year=d.year-1,day=28)
+            if comparison in reference:
+                depends.append(reference[comparison])
         known = [p.available_at for p in depends]
         available = max(known) if all(x is not None for x in known) else None
         result.append(Point(d,v,available))

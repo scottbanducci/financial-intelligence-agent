@@ -71,6 +71,7 @@ def publish_pointer(directory: str | Path, data: Mapping) -> Path:
     """Write verified manifest as an atomic pointer, never partial JSON."""
     path=Path(directory)
     path.mkdir(parents=True,exist_ok=True)
+    verify(path,data)  # refuse to publish a corrupt/missing asset pointer
     target=path/"LATEST.json"
     blob=json.dumps(dict(data),sort_keys=True,indent=2)
     fd,tmp=tempfile.mkstemp(prefix=".manifest-",dir=path)

@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import closing
 from dataclasses import replace
 from datetime import date,timedelta,datetime,timezone
 from pathlib import Path
@@ -57,7 +58,7 @@ def _add(key:str,series:Series,descriptor:Descriptor,retrieved:str="",warnings:s
 
 def _load_public_series():
     st.markdown("#### Unified publisher data search")
-    with get_connection() as db:
+    with closing(get_connection()) as db:
         state=catalog_status(db)
         query=st.text_input("Search locally indexed financial data series",
                             placeholder="Treasury positions, SOFR, reserves, dealer financing, repo ...",
@@ -122,11 +123,13 @@ def _load_public_series():
         except Exception as exc:
             st.error("Source retrieval failed; no demo data substituted: "+str(exc))
     st.caption("FRED keys are loaded exclusively from server-side configuration. No API credentials are accepted in the browser.")
+    if query and len(results)>=150:
+        st.caption("Showing the first 150 local matches; refine your keywords to narrow the list.")
 
 
 def _load_dealers():
     st.markdown("#### Primary-dealer statistical series")
-    with get_connection() as db:
+    with closing(get_connection()) as db:
         items=catalog_search(db,"NYFED_PD:",limit=250)
         count=db.execute("SELECT COUNT(*) FROM entries WHERE provider='NYFED_PD'").fetchone()[0]
     st.caption(f"{count:,} individual publisher series indexed at startup. Search by topic or series ID in Unified Publisher Search above.")

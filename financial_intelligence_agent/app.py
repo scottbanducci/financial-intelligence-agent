@@ -7,7 +7,12 @@ import pandas as pd
 import streamlit as st
 
 ROOT=Path(__file__).resolve().parent
+# Never ship a real FRED key in source control. Local credentials live in
+# financial_intelligence_agent/.env; production uses a server secret.
+from dotenv import load_dotenv
+load_dotenv(ROOT / ".env",override=False)
 sys.path.insert(0,str(ROOT/"src"))
+from financial_intelligence_agent.live.catalog_index import bootstrap as bootstrap_catalog
 from financial_intelligence_agent.agent.dispatcher import Engine,TOOLS
 from financial_intelligence_agent.data.csv_rates import CsvRatesReader
 from financial_intelligence_agent.tools.snapshot_insights import MacroSnapshot,FROZEN_CUTOFF
@@ -18,6 +23,14 @@ from financial_intelligence_agent.live.studio import render as live_studio
 import json
 
 st.set_page_config(page_title="Market Liquidity | Research Workbench",layout="wide",page_icon="◈")
+# Launch-time metadata indexing. The local cached index is immediately
+# searchable; FRED pagination and NY Fed metadata discovery run in a daemon
+# worker, so a huge publisher catalog cannot block the first browser render.
+@st.cache_resource(show_spinner=False)
+def _catalog_start():
+    return bootstrap_catalog(enable_network=os.getenv("ANALYST_DISABLE_CATALOG_WARM","")!="1")
+_catalog_start()
+
 # Optional SINGLE-PASSWORD gate for a private preview only. This is NOT
 # multitenant SSO, billing authentication or protection against brute force.
 preview_secret=os.getenv("ANALYST_DEMO_PASSWORD","")

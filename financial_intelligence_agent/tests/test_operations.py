@@ -26,6 +26,7 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(len(op.series),2)
         self.assertEqual(op.series["Reverse Repo"].points[0].value,Decimal(140))
         self.assertEqual(op.series["Repo"].points[-1].value,Decimal(30))
+        self.assertEqual(op.unit,"USD")
         self.assertEqual(op.daily[0]["operations"],1)
     def test_type_filter_client_side(self):
         op=aggregate_operations(self.sample(),operation_type="reverse repo")

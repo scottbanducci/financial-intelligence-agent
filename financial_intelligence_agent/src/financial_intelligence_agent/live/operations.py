@@ -19,11 +19,10 @@ from financial_intelligence_agent.live.nyfed_explorer import PublicDataset,recor
 DATE_KEYS=("operationDate","operation_date","date")
 TYPE_KEYS=("operationType","type","operation")
 ADDITIVE_METRICS={
-    "totalAmtAccepted":"USD millions",
-    "totalAmtSubmitted":"USD millions",
-    "totalAccepted":"USD millions",
-    "totalSubmitted":"USD millions",
-    "totalParAmtAccepted":"USD millions",
+    # Repo operation result API monetary amounts are reported as USD amounts,
+    # e.g. 200000000 represents $200 million, NOT 200m * millions.
+    "totalAmtAccepted":"USD",
+    "totalAmtSubmitted":"USD",
 }
 MAX_OPERATION_ROWS=10000
 

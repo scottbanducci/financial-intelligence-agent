@@ -81,6 +81,17 @@ def seed(db:sqlite3.Connection)->None:
     for d in seed_catalog():
         put_entry(db,d)
     db.execute("INSERT OR IGNORE INTO fred_categories(category_id,status) VALUES(0,'pending')")
+    # A small documented fallback is immediately searchable even when the
+    # NY Fed schema service is temporarily unavailable at app startup.
+    base = (
+        ("rp/results/search.json","Repo / reverse repo operation results","Repo and reverse repo operations"),
+        ("pd/list/timeseries.json","Primary dealer statistical series catalog","Primary Dealer Statistics"),
+        ("seclending/all/results/summary/latest.json","Securities lending operations summary","Securities Lending Operations"),
+    )
+    for endpoint,label,category in base:
+        put_entry(db,Descriptor("NY_ENDPOINT:"+endpoint,label,"NY_ENDPOINT",
+                  "varies","irregular",category,NY_BASE+"/"+endpoint,
+                  "publisher_specification"),kind="endpoint_template",endpoint=endpoint)
     db.commit()
 
 
@@ -240,6 +251,11 @@ def ny_spec_entries(spec:Mapping[str,Any])->list[tuple[Descriptor,str]]:
         # Retain templates in metadata but do not generate network requests
         # from unresolved {parameter} segments.
         endpoint=path.removeprefix("/api/").lstrip("/")
+        # Swagger may express a format placeholder instead of a literal
+        # extension; index the documented JSON representation when available.
+        for suffix in (".{fileType}",".{format}",".{file_type}",".{fType}"):
+            if endpoint.endswith(suffix):
+                endpoint=endpoint[:-len(suffix)]+".json"
         if not endpoint.startswith(("rp/","pd/","rates/","seclending/","soma/","tsy/","ambs/","cb/","cbliquidity/")):
             continue
         if not endpoint.endswith(".json"):continue

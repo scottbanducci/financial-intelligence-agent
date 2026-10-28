@@ -23,6 +23,8 @@ jobs:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Seven-page UI and chart-render integration checks
+        env:
+          ANALYST_DISABLE_CATALOG_WARM: "1"
         run: |
           python - <<'PY'
           from streamlit.testing.v1 import AppTest

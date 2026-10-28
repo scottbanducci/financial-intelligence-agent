@@ -93,7 +93,7 @@ def _load_public_series():
     if kind=="endpoint_template":
         st.caption("This is a publisher API endpoint definition. It may need path parameters before retrieving its records.")
         endpoint=choice["endpoint"]
-        placeholders=list(dict.fromkeys(re.findall(r"\\{([A-Za-z_][A-Za-z0-9_]*)\\}",endpoint)))
+        placeholders=list(dict.fromkeys(re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}",endpoint)))
         substitutions={}
         for param in placeholders:
             substitutions[param]=st.text_input(

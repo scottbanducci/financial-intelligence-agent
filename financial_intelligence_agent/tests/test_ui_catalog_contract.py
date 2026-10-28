@@ -16,6 +16,6 @@ class CatalogUIContract(unittest.TestCase):
     def test_operation_chart_and_detail(self):
         text=(ROOT/"src/financial_intelligence_agent/live/studio.py").read_text()
         self.assertIn("aggregate_operations",text)
-        self.assertIn("Underlying operation / publisher records",text)
+        self.assertIn("Operations underlying the current daily chart",text)
         self.assertIn("Download full publisher detail CSV",text)
 if __name__=="__main__":unittest.main()

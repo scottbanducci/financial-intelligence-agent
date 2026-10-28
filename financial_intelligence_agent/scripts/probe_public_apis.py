@@ -30,6 +30,7 @@ def main():
             {"count":len(ny_rate("SOFR",start,end).series.points)}),
         check("NY Fed dealer metadata",lambda:
             {"count":len(dealer_catalog())}),
+        check("NY Fed OpenAPI GET endpoint catalog",lambda: probe_swagger()),
         check("NY Fed dealer JSON envelope",lambda: raw_dealer_shape()),
         check("NY Fed repo operations JSON explorer",lambda: probe_repo_shape()),
         check("NY Fed real dealer time series",lambda:{"count":len(dealer("PDPOSGST-TOT",
@@ -69,6 +70,13 @@ def probe_repo_shape():
         rows=records_from_path(sample,path)
         details[path]={"count":len(rows),"fields":list(rows[0])[:18] if rows else []}
     return details
+
+def probe_swagger():
+    from financial_intelligence_agent.live.catalog_index import _get_swagger,ny_spec_entries
+    spec=_get_swagger()
+    published=ny_spec_entries(spec)
+    return {"swagger_paths":len(spec.get("paths",{})),"indexed_json_get_paths":len(published),
+            "sample":list(d.id for d,ep in published[:10])}
 
 if __name__=="__main__":
     raise SystemExit(main())

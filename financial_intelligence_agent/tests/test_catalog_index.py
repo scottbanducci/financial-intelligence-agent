@@ -50,7 +50,7 @@ class CatalogIndexTests(unittest.TestCase):
             return [Descriptor("NYFED_PD:PDPOSGST-TOT","Dealer Treasury","NYFED_PD",
                 "USD millions","weekly","Dealer","https://markets.newyorkfed.org/api/pd/get/PDPOSGST-TOT.json")]
         result=warm_ny(self.db,dealers=dealers,spec_loader=lambda:spec)
-        self.assertEqual(result["counts"]["NY_ENDPOINT"],2)
+        self.assertEqual(result["counts"]["NY_ENDPOINT"],4)  # 3 seeded fallbacks + 1 new SOMA path
         self.assertIsNotNone(lookup(self.db,"NYFED_PD:PDPOSGST-TOT"))
     def test_bootstrap_is_nonblocking_and_seed_only(self):
         info=bootstrap(Path(self.temp.name)/"second.sqlite",enable_network=False)

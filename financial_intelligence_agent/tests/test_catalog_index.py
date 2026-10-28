@@ -52,6 +52,22 @@ class CatalogIndexTests(unittest.TestCase):
         result=warm_ny(self.db,dealers=dealers,spec_loader=lambda:spec)
         self.assertEqual(result["counts"]["NY_ENDPOINT"],4)  # 3 seeded fallbacks + 1 new SOMA path
         self.assertIsNotNone(lookup(self.db,"NYFED_PD:PDPOSGST-TOT"))
+    def test_completed_fred_catalog_is_invalidated_when_stale(self):
+        import datetime
+        from financial_intelligence_agent.live.catalog_index import bootstrap
+        path=Path(self.temp.name)/"refresh.sqlite"
+        db=get_connection(path)
+        seed(db)
+        db.execute("UPDATE fred_categories SET status='done'")
+        db.execute("INSERT INTO crawl_state(name,value) VALUES('fred_complete','true')")
+        db.execute("INSERT INTO crawl_state(name,value) VALUES('fred_updated','2020-01-01T00:00:00+00:00')")
+        db.commit();db.close()
+        bootstrap(path,enable_network=False)
+        check=get_connection(path)
+        current=status(check)
+        self.assertEqual(current["fred_categories"].get("pending"),1)
+        self.assertNotIn("fred_complete",current["state"])
+        check.close()
     def test_bootstrap_is_nonblocking_and_seed_only(self):
         info=bootstrap(Path(self.temp.name)/"second.sqlite",enable_network=False)
         self.assertFalse(info["worker_running"])

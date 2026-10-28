@@ -297,7 +297,22 @@ def bootstrap(path:str|Path=DB_DEFAULT, *,enable_network:bool=True)->dict:
     path=Path(path).resolve()
     with _LOCK:
         db=get_connection(path)
-        try: seed(db)
+        try:
+            seed(db)
+            # A completed FRED census should eventually refresh, rather than
+            # leaving the same static catalog forever after its first run.
+            state=dict(db.execute("SELECT name,value FROM crawl_state").fetchall())
+            if state.get("fred_complete")=="true" and state.get("fred_updated"):
+                try:
+                    updated=datetime.fromisoformat(state["fred_updated"])
+                    age=(datetime.now(timezone.utc)-updated).total_seconds()
+                    if age>7*86400:
+                        db.execute("UPDATE fred_categories SET status='pending'")
+                        db.execute("DELETE FROM crawl_state WHERE name='fred_complete'")
+                        db.commit()
+                except ValueError:
+                    db.execute("DELETE FROM crawl_state WHERE name='fred_complete'")
+                    db.commit()
         finally:db.close()
         if enable_network and str(path) not in _WORKERS:
             def work():

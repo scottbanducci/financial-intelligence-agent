@@ -14,6 +14,8 @@ import pandas as pd
 import streamlit as st
 
 from financial_intelligence_agent.live.nyfed_explorer import discover as discover_nyfed,records_from_path,map_series
+from financial_intelligence_agent.live.catalog_index import get_connection,search as catalog_search,status as catalog_status
+from financial_intelligence_agent.live.operations import aggregate_operations,metric_options,operation_types
 from financial_intelligence_agent.live.panels import fetch_bank_panel,contraction_breadth
 from financial_intelligence_agent.live.databricks_gold import read_gold,descriptors as gold_descriptors
 from financial_intelligence_agent.live.fdic import bank_financial,FIELDS
@@ -48,82 +50,91 @@ def _entry_desc(key:str,series:Series)->Descriptor:
 def _add(key:str,series:Series,descriptor:Descriptor,retrieved:str="",warnings:str=""):
     if len(_state())>=80 and key not in _state():
         raise ValueError("Workspace capacity 80 series; remove unused series")
+    if series.key != key:
+        series=replace(series,key=key)
     _state()[key]={"series":series,"descriptor":descriptor,
                    "retrieved":retrieved,"warning":warnings}
 
 def _load_public_series():
-    st.markdown("#### Live public datasets")
-    presets=catalog()
-    choices={d.label+"  ·  "+d.id:d.id for d in presets}
-    choice=st.selectbox("Curated publisher series",list(choices),key="live_choice")
-    query=st.text_input("Search the complete FRED series catalog",placeholder="e.g. commercial-bank loans")
-    user_fred_key=st.text_input("Your FRED API key (session only; optional when configured server-side)",
-                                type="password",key="studio_fred_key")
-    if st.button("Search FRED",key="fred_search_button"):
+    st.markdown("#### Unified publisher data search")
+    with get_connection() as db:
+        state=catalog_status(db)
+        query=st.text_input("Search locally indexed financial data series",
+                            placeholder="Treasury positions, SOFR, reserves, dealer financing, repo ...",
+                            key="global_series_search")
+        results=catalog_search(db,query,limit=150)
+    count=sum(state["counts"].values())
+    progress=state["fred_categories"]
+    complete=state["state"].get("fred_complete")=="true"
+    st.caption(f"{count:,} indexed datasets/endpoint templates. NY Fed metadata and FRED category pages are fetched at app startup, then searched locally.")
+    if not complete:
+        st.info("FRED catalog crawl is still pending or incomplete. Discovered records remain searchable; this is not yet an exhaustive FRED index.")
+    if state["state"].get("fred_error"):
+        st.caption("FRED discovery: "+state["state"]["fred_error"])
+    if state["state"].get("ny_spec_error"):
+        st.caption("NY Fed OpenAPI discovery: "+state["state"]["ny_spec_error"])
+    if not results:
+        st.info("No indexed match. Try another term; the full index may still be warming.")
+        return
+    choice=st.selectbox(
+        "Select a series or published endpoint",
+        options=results,
+        format_func=lambda item:f'{item["provider"]} · {item["label"]} [{item["id"]}]'[:210],
+        key="global_index_result")
+    details=pd.DataFrame([{k:item[k] for k in ("id","label","provider","frequency","unit","kind")}
+                         for item in results[:80]])
+    with st.expander("Search result metadata",expanded=False):
+        st.dataframe(details,hide_index=True,use_container_width=True)
+    x,y=st.columns(2)
+    start=x.date_input("From",date.today()-timedelta(days=365*3),key="global_search_start")
+    end=y.date_input("Through",date.today(),key="global_search_end")
+    kind=choice["kind"];series_id=choice["id"]
+    if kind=="endpoint_template":
+        st.caption("This is an API endpoint definition, not necessarily an individual time series.")
+        if st.button("Use this NY Fed endpoint",key="indexed_endpoint_choice"):
+            endpoint=choice["endpoint"]
+            if "{" in endpoint or "}" in endpoint:
+                st.warning("The endpoint requires path parameters; use a concrete published path in the NY Fed explorer.")
+            else:
+                st.session_state["nyfed_endpoint_suggestion"]=endpoint
+                st.success("Endpoint selected. Open the 'Other NY Fed APIs' tab below to inspect its record fields and daily aggregates.")
+        return
+    if st.button("Retrieve series observations",type="primary",key="indexed_fetch"):
         try:
-            from financial_intelligence_agent.live.providers import fred_search
-            st.session_state["fred_search_result"]=fred_search(query,api_key=user_fred_key or None)
-        except Exception as exc:st.error("Search unavailable: "+str(exc))
-    matches=st.session_state.get("fred_search_result",[])
-    if matches:
-        selected_search=st.selectbox("Publisher search results",matches,
-            format_func=lambda d:(d.label+" · "+d.id+" · "+d.unit)[:190],
-            key="fred_search_result_select")
-        st.caption("Select a search result and click Fetch; its reported units/frequency are retained.")
-    x,y,z=st.columns([1,1,1])
-    start=x.date_input("From",date.today()-timedelta(days=365*3),key="live_start")
-    end=y.date_input("Through",date.today(),key="live_end")
-    custom=z.text_input("FRED ID (optional)",placeholder="e.g. WALCL",key="live_fred_custom").strip().upper()
-    use_search=st.checkbox("Fetch selected FRED search result",value=False,key="choose_search_result") if matches else False
-    series_id=selected_search.id if use_search else ("FRED:"+custom if custom else choices[choice])
-    if st.button("Fetch current publisher data",type="primary",key="get_live"):
-        try:
-            if series_id.startswith("FRED:") and not (user_fred_key or os.getenv("FRED_API_KEY")):
-                raise ValueError("Supply your FRED API key or configure server-side credentials")
-            with st.spinner("Fetching and validating publisher observations"):
-                if series_id.startswith("FRED:") and user_fred_key:
-                    result=fetch_series(series_id,start.isoformat(),end.isoformat(),api_key=user_fred_key)
+            with st.spinner("Loading the selected publisher data"):
+                if series_id.startswith("NYFED_PD:"):
+                    from financial_intelligence_agent.live.providers import dealer
+                    result=dealer(series_id[len("NYFED_PD:"):],
+                                  start.isoformat(),end.isoformat())
                 else:
                     result=_cached_fetch(series_id,start.isoformat(),end.isoformat())
-            if use_search:
-                described=selected_search
-                result=replace(result,series=replace(result.series,unit=described.unit,frequency=described.frequency),
-                               descriptor=described)
-            _add(series_id,result.series,result.descriptor,result.retrieved_at,result.warning)
-            st.success("Loaded "+str(len(result.series.points))+" observed records from "+result.descriptor.provider)
+            desc=Descriptor(series_id,choice["label"],choice["provider"],
+                            choice["unit"],choice["frequency"],choice["category"],
+                            choice["source_url"],choice["convention"])
+            converted=replace(result.series,key=series_id,
+                              unit=desc.unit,frequency=desc.frequency)
+            _add(series_id,converted,desc,result.retrieved_at,result.warning)
+            st.success(f"Loaded {len(converted.points):,} observations for {desc.label}")
+            frame=pd.DataFrame([{"Observation date":p.date,"Value":float(p.value) if p.value is not None else None}
+                                for p in converted.select().points]).set_index("Observation date")
+            st.line_chart(frame,y_label=desc.unit)
+            st.dataframe(frame.tail(100),use_container_width=True)
         except Exception as exc:
-            st.error("Live fetch failed (no fixture fallback): "+str(exc))
-    st.caption("NY Fed reference rates are public. FRED keys are never exported; users of a commercial FRED application may need their own FRED API keys. Revisions and publication timing are not guaranteed.")
+            st.error("Source retrieval failed; no demo data substituted: "+str(exc))
+    st.caption("FRED keys are loaded exclusively from server-side configuration. No API credentials are accepted in the browser.")
+
 
 def _load_dealers():
-    st.markdown("#### NY Federal Reserve primary dealers")
-    st.caption("Discover publisher-defined positions, transactions, financing and settlement-fails series. Historical series-break definitions must be considered.")
-    if st.button("Discover primary-dealer catalog",key="discover_pd"):
-        try:
-            with st.spinner("Retrieving primary dealer field dictionary"):
-                st.session_state["pd_descriptors"]=_cached_dealers()
-            st.success("Loaded publisher metadata for "+str(len(st.session_state["pd_descriptors"]))+" series IDs")
-        except Exception as exc:st.error(str(exc))
-    descriptions=st.session_state.get("pd_descriptors",[])
-    if descriptions:
-        search=st.text_input("Search dealer series labels",placeholder="Treasury, repo, fails ...").lower()
-        filtered=[d for d in descriptions if search in d.label.lower() or search in d.id.lower()]
-        if filtered:
-            choice=st.selectbox("Dealer series",filtered,format_func=lambda d:(d.id+" · "+d.label)[:180])
-            if st.button("Fetch dealer time series",key="fetch_pd"):
-                try:
-                    from financial_intelligence_agent.live.providers import dealer
-                    from datetime import timezone
-                    result=dealer(choice.id[9:],(date.today()-timedelta(days=365*3)).isoformat(),
-                                  date.today().isoformat(),
-                                  authorized_ids={d.id[9:] for d in descriptions})
-                    _add(choice.id,result.series,replace(choice,unit=result.descriptor.unit),
-                         result.retrieved_at,result.warning)
-                    st.success("Loaded "+str(len(result.series.points))+" records")
-                except Exception as exc:
-                    st.error("Dealer response could not be validated: "+str(exc))
-        else:st.info("No matching dealer series")
-    st.caption("The New York Fed publishes primary-dealer aggregate series, not individual firms' complete balance sheets.")
+    st.markdown("#### Primary-dealer statistical series")
+    with get_connection() as db:
+        items=catalog_search(db,"NYFED_PD:",limit=250)
+        count=db.execute("SELECT COUNT(*) FROM entries WHERE provider='NYFED_PD'").fetchone()[0]
+    st.caption(f"{count:,} individual publisher series indexed at startup. Search by topic or series ID in Unified Publisher Search above.")
+    if not count:
+        st.info("Primary-dealer metadata is being loaded. Return to this tab when the startup index finishes.")
+    else:
+        st.caption("Unlike operation logs, a primary-dealer keyid already represents one defined historical series. No automatic sum of multiple observations is performed.")
+
 
 def _load_fdic():
     st.markdown("#### FDIC bank-by-bank financial reports")
@@ -193,66 +204,122 @@ def _load_breadth():
         except Exception as exc:st.error("Panel analysis unavailable: "+str(exc))
 
 def _load_nyfed_other():
-    st.markdown("#### Other NY Fed Markets API datasets")
-    st.caption("Public REST JSON explorer for repo/reverse-repo, securities lending, SOMA, primary-dealer and other publisher API families. Map date, measure, filter and same-day aggregation explicitly.")
+    st.markdown("#### New York Fed operations and other API families")
+    st.caption("Operations are transaction-level data. We aggregate compatible monetary amounts by day and operation type for charts, retaining the original row-level detail underneath.")
+    catalog_path=st.session_state.get("nyfed_endpoint_suggestion","rp/results/search.json")
     examples={
-       "Repo / reverse repo operation results":"rp/results/search.json",
-       "Custom documented Markets API path":""
+        "Repo / reverse repo operations":"rp/results/search.json",
+        "Selected indexed endpoint":catalog_path,
+        "Other documented endpoint":""
     }
-    chosen=st.selectbox("Endpoint template",list(examples),key="nyfed_explorer_kind")
-    manual=st.text_input("Relative API path (.json, no host)",
-                         value=examples[chosen],key="nyfed_explorer_path")
+    selected=st.selectbox("Published Markets API endpoint",list(examples),
+                          key="nyfed_api_template")
+    custom=st.text_input("Relative .json path on markets.newyorkfed.org/api/",
+                         value=examples[selected],key="nyfed_api_location")
     one,two=st.columns(2)
     start=one.date_input("From",date.today()-timedelta(days=30),key="nyfed_api_start")
     end=two.date_input("Through",date.today(),key="nyfed_api_end")
-    use_dates=st.checkbox("Include startDate/endDate filter",value=True,key="nyfed_api_dates")
-    if st.button("Discover NY Fed JSON fields",key="discover_api_fields"):
+    use_dates=st.checkbox("Pass start/end date filters",value=True,key="nyfed_use_dates")
+    if st.button("Fetch published operation records",type="primary",key="nyfed_fetch_operations"):
         try:
-            dataset=discover_nyfed(manual,start=start.isoformat() if use_dates else None,
-                                   end=end.isoformat() if use_dates else None)
-            st.session_state["nyfed_explorer_payload"]=dataset
-            st.success("Discovered "+str(len(dataset.candidate_paths))+" record arrays")
-        except Exception as exc:st.error("NY Fed endpoint unsupported: "+str(exc))
+            data=discover_nyfed(custom,start=start.isoformat() if use_dates else None,
+                                end=end.isoformat() if use_dates else None)
+            st.session_state["nyfed_explorer_payload"]=data
+            st.success("Publisher JSON loaded. "+str(len(data.candidate_paths))+" record arrays found.")
+        except Exception as exc:st.error("NY Fed request failed: "+str(exc))
     data=st.session_state.get("nyfed_explorer_payload")
     if data is None:return
-    st.caption("Publisher endpoint: "+data.endpoint+" · fetched "+data.fetched_at)
+    st.caption("Retrieved "+data.fetched_at+" · Endpoint: "+data.endpoint)
     if not data.candidate_paths:
-        st.warning("No arrays of JSON objects found. This endpoint may be summary-only or need a specific publisher parameter.")
-        with st.expander("Response shape"):
-            st.json({"keys":list(data.payload),"types":{k:type(v).__name__ for k,v in data.payload.items()}})
+        st.warning("This endpoint has no recognized record array; inspect the publisher schema.")
         return
-    candidate=st.selectbox("Published record array",data.candidate_paths,key="nyfed_api_path")
+    records_path=st.selectbox("Publisher record array",data.candidate_paths,
+                              key="nyfed_record_array")
     try:
-        records=records_from_path(data,candidate)
-    except Exception as exc:st.error("Record mapping unavailable: "+str(exc));return
-    if not records:return
-    columns=sorted(set().union(*(set(row) for row in records[:50])))
-    st.caption("Source records: "+str(len(records))+"; preview 10 records; values are not normalized until mapped.")
-    st.dataframe(pd.DataFrame(records[:10]),use_container_width=True,hide_index=True)
-    if not columns:return
-    x,y,z=st.columns(3)
-    date_col=x.selectbox("Observation date column",columns,index=columns.index("operationDate") if "operationDate" in columns else 0,key="nyfed_date_col")
-    suggested=next((field for field in ("totalAmtAccepted","value","percentRate","totalAmtSubmitted","amount")
-                    if field in columns),columns[0])
-    numeric_col=y.selectbox("Numeric value column",columns,index=columns.index(suggested),key="nyfed_value_col")
-    units=z.text_input("Exact source unit",value="source-native (verify publisher)",key="nyfed_unit")
-    freq=st.selectbox("Data frequency",["daily","weekly","monthly","quarterly","annual","irregular"],key="nyfed_frequency")
-    name=st.text_input("Workspace series ID",value="NYFED_CUSTOM",key="nyfed_custom_name")
-    agg=st.selectbox("Records sharing one date",["reject","sum","mean","last"],key="nyfed_same_day_policy")
-    filter_col=st.selectbox("Optional field filter",["(none)",*columns],key="nyfed_filter_col")
-    filter_val=st.text_input("Exact value to retain",key="nyfed_filter_val") if filter_col!="(none)" else None
-    if st.button("Validate and map to an analytical series",key="nyfed_map_series"):
-        try:
-            mapped=map_series(data,path=candidate,key=name,date_field=date_col,value_field=numeric_col,
-                              unit=units,frequency=freq,aggregation=agg,
-                              filter_field=None if filter_col=="(none)" else filter_col,
-                              filter_value=filter_val)
-            desc=Descriptor("NYFED_API:"+name,name+" ("+data.endpoint+")","NYFED",
-                  units,freq,"Mapped NY Fed Markets API",data.endpoint,"unverified_generic_publisher_date")
-            _add(name,mapped,desc,data.fetched_at,
-                 "User-configured mapping; publisher units, break dates and record deduplication must be verified")
-            st.success("Added "+str(len(mapped.points))+" normalized dates; now chartable and exportable")
-        except Exception as exc:st.error("Field mapping rejected: "+str(exc))
+        rows=records_from_path(data,records_path)
+    except Exception as exc:
+        st.error("Cannot extract published records: "+str(exc));return
+    columns=sorted(set().union(*(set(row) for row in rows[:100]))) if rows else []
+    if not columns:
+        st.warning("No operation records in this date window.");return
+    st.caption(str(len(rows))+" source records; the table below is the original publisher detail.")
+    operation_ready=("operationDate" in columns and
+                     ("operationType" in columns or "type" in columns) and
+                     bool(metric_options(data,records_path)))
+    if operation_ready:
+        metrics=metric_options(data,records_path)
+        metric=st.selectbox("Additive amount to chart",metrics,
+                            index=metrics.index("totalAmtAccepted") if "totalAmtAccepted" in metrics else 0,
+                            key="nyfed_operations_metric")
+        choices=operation_types(data,records_path)
+        selected_type=st.selectbox("Operation type",["All types",*choices],
+                                  key="nyfed_operations_type")
+        if st.button("Aggregate per day and chart",type="primary",key="nyfed_daily_aggregate"):
+            try:
+                result=aggregate_operations(data,record_path=records_path,metric=metric,
+                    operation_type=None if selected_type=="All types" else selected_type)
+                st.session_state["nyfed_operation_view"]=result
+                for typ,series in result.series.items():
+                    k=series.key
+                    desc=Descriptor(k,f"{typ} · {metric} (daily aggregate)",
+                                    "NYFED",result.unit,"daily","NY Fed operations",
+                                    "https://markets.newyorkfed.org/api/"+data.endpoint,
+                                    "operation_date")
+                    _add(k,series,desc,data.fetched_at,
+                         "Daily monetary sum per operation type; original operation rows retained below.")
+            except Exception as exc:st.error("Aggregation rejected: "+str(exc))
+        report=st.session_state.get("nyfed_operation_view")
+        if report is not None and report.endpoint==data.endpoint:
+            st.subheader("Daily operation totals")
+            matrix=pd.DataFrame(report.daily)
+            if not matrix.empty:
+                display=matrix.pivot(index="observation_date",
+                                       columns="operation_type",values="total")
+                display=display.apply(pd.to_numeric,errors="coerce")
+                st.line_chart(display,y_label=report.unit)
+                st.dataframe(matrix,hide_index=True,use_container_width=True)
+                st.download_button("Download daily aggregates CSV",
+                                   matrix.to_csv(index=False).encode("utf-8"),
+                                   file_name="nyfed-daily-operation-totals.csv",mime="text/csv")
+            for note in report.field_notes:st.caption(note)
+    else:
+        st.info("This endpoint does not match the operation-level schema. Use the explicit field mapper below for other publisher datasets.")
+        date_col=st.selectbox("Observation date field",columns,
+                              index=columns.index("date") if "date" in columns else 0,
+                              key="nyfed_generic_date")
+        amount_col=st.selectbox("Numeric field",columns,
+                              index=columns.index("value") if "value" in columns else 0,
+                              key="nyfed_generic_value")
+        unit=st.text_input("Publisher unit (verify from documentation)",
+                           "source-native",key="nyfed_generic_unit")
+        frequency=st.selectbox("Frequency",["daily","weekly","monthly","quarterly","annual","irregular"],
+                               key="nyfed_generic_frequency")
+        aggregation=st.selectbox("Duplicate-day policy",["reject","sum","mean","last"],
+                                 key="nyfed_generic_aggregation")
+        if st.button("Map records to a series",key="nyfed_generic_map"):
+            try:
+                s=map_series(data,path=records_path,key="NYFED_MAPPED",
+                             date_field=date_col,value_field=amount_col,
+                             unit=unit,frequency=frequency,aggregation=aggregation)
+                _add("NYFED_MAPPED",s,_entry_desc("NYFED_MAPPED",s),
+                     data.fetched_at,"Verify schema, field definition and unit before use.")
+                st.success("Mapped "+str(len(s.points))+" date observations.")
+            except Exception as exc:st.error("Mapping rejected: "+str(exc))
+    st.subheader("Underlying operation / publisher records")
+    details=pd.DataFrame(rows)
+    st.dataframe(details,hide_index=True,use_container_width=True,height=350)
+    # Formula-escape all cells to avoid spreadsheet injection when exported.
+    import csv,io
+    out=io.StringIO()
+    writer=csv.writer(out)
+    writer.writerow([str(c) for c in details.columns])
+    for values in details.itertuples(index=False,name=None):
+        writer.writerow([("'"+str(v) if isinstance(v,str) and v.lstrip().startswith(("=","+","-","@"))
+                          else v) for v in values])
+    st.download_button("Download full publisher detail CSV",
+                       out.getvalue().encode("utf-8-sig"),
+                       file_name="nyfed-operation-detail.csv",mime="text/csv",
+                       key="nyfed_detail_export")
 
 
 def _load_upload():

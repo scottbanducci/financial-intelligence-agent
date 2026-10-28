@@ -65,3 +65,19 @@ still pinned to its October 2026 fixture; the Live Data Studio must be used
 for on-demand current data.
 
 Existing Databricks jobs/pipelines and the GitHub main branch are untouched.
+
+
+## New publisher index and server-side FRED configuration
+
+Copy financial_intelligence_agent/.env.example to an untracked .env in the
+same directory; set FRED_API_KEY there or in a server secret manager.
+The app does not display a FRED key field or Curated Publisher series menu.
+
+At startup it seeds a local searchable SQLite database, then incrementally
+fetches NY Fed keyid and OpenAPI endpoint metadata and the entire paginated
+FRED category/series tree (when a key exists). Searches use the local index
+and are fast; the initial exhaustive FRED crawl is NOT instantaneous.
+Operations are charted as daily per-type dollar sums with underlying detail
+below, while individual Primary Dealer statistics are charted as time series.
+
+Details: financial_intelligence_agent/docs/source_index_and_operations.md

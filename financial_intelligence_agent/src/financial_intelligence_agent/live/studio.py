@@ -228,6 +228,9 @@ def _load_nyfed_other():
             data=discover_nyfed(custom,start=start.isoformat() if use_dates else None,
                                 end=end.isoformat() if use_dates else None)
             st.session_state["nyfed_explorer_payload"]=data
+            # A new API request invalidates previously aggregated chart data.
+            # Never show an old operation chart under newly fetched rows.
+            st.session_state.pop("nyfed_operation_view",None)
             st.success("Publisher JSON loaded. "+str(len(data.candidate_paths))+" record arrays found.")
         except Exception as exc:st.error("NY Fed request failed: "+str(exc))
     data=st.session_state.get("nyfed_explorer_payload")

@@ -308,8 +308,18 @@ def _load_nyfed_other():
                      data.fetched_at,"Verify schema, field definition and unit before use.")
                 st.success("Mapped "+str(len(s.points))+" date observations.")
             except Exception as exc:st.error("Mapping rejected: "+str(exc))
-    st.subheader("Underlying operation / publisher records")
-    details=pd.DataFrame(rows)
+    active_view=st.session_state.get("nyfed_operation_view")
+    if (operation_ready and active_view is not None
+            and active_view.endpoint==data.endpoint):
+        # The detail table must correspond to the data actually aggregated
+        # into the displayed chart, including the selected operation type.
+        underlying=list(active_view.detail)
+        st.subheader("Operations underlying the current daily chart")
+        st.caption(f"{len(underlying)} matching source records, before daily aggregation")
+    else:
+        underlying=rows
+        st.subheader("Underlying publisher records")
+    details=pd.DataFrame(underlying)
     st.dataframe(details,hide_index=True,use_container_width=True,height=350)
     # Formula-escape all cells to avoid spreadsheet injection when exported.
     import csv,io

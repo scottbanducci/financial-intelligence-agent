@@ -91,14 +91,26 @@ def _load_public_series():
     end=y.date_input("Through",date.today(),key="global_search_end")
     kind=choice["kind"];series_id=choice["id"]
     if kind=="endpoint_template":
-        st.caption("This is an API endpoint definition, not necessarily an individual time series.")
+        st.caption("This is a publisher API endpoint definition. It may need path parameters before retrieving its records.")
+        endpoint=choice["endpoint"]
+        placeholders=list(dict.fromkeys(re.findall(r"\\{([A-Za-z_][A-Za-z0-9_]*)\\}",endpoint)))
+        substitutions={}
+        for param in placeholders:
+            substitutions[param]=st.text_input(
+                "Required endpoint parameter: "+param,
+                key="endpoint_parameter_"+param)
         if st.button("Use this NY Fed endpoint",key="indexed_endpoint_choice"):
-            endpoint=choice["endpoint"]
-            if "{" in endpoint or "}" in endpoint:
-                st.warning("The endpoint requires path parameters; use a concrete published path in the NY Fed explorer.")
-            else:
+            try:
+                for name,value in substitutions.items():
+                    if not re.fullmatch(r"[A-Za-z0-9_-]{1,60}",value):
+                        raise ValueError("Supply a valid alphanumeric value for "+name)
+                    endpoint=endpoint.replace("{"+name+"}",value)
+                from financial_intelligence_agent.live.nyfed_explorer import validate_endpoint
+                endpoint=validate_endpoint(endpoint)
                 st.session_state["nyfed_endpoint_suggestion"]=endpoint
-                st.success("Endpoint selected. Open the 'Other NY Fed APIs' tab below to inspect its record fields and daily aggregates.")
+                st.success("Endpoint selected. Open 'Other NY Fed APIs' below to load and examine publisher data.")
+            except Exception as exc:
+                st.error("Endpoint parameters unavailable: "+str(exc))
         return
     if st.button("Retrieve series observations",type="primary",key="indexed_fetch"):
         try:

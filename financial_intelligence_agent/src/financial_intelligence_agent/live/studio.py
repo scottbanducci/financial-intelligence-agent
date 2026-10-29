@@ -129,7 +129,9 @@ def _show_ny_chart(result):
             fig.update_layout(title=f"{definition.label} · {name}",
                 xaxis_title="Operation date",yaxis_title=f"Amount ({name})",
                 template="plotly_dark",height=320)
-            st.plotly_chart(fig,use_container_width=True,key="nyfx_"+series.key)
+            st.plotly_chart(fig,use_container_width=True,key="nyfx_"+series.key,
+                config={"toImageButtonOptions":{"format":"png","filename":"nyfed-swaps-"+name,
+                        "height":750,"width":1300,"scale":2}})
         return
     fig=go.Figure()
     if definition.mode=="rates":
@@ -158,7 +160,9 @@ def _show_ny_chart(result):
         xaxis_title="Effective date" if definition.mode=="rates" else "Operation date",
         template="plotly_dark",height=460,hovermode="x unified",
         legend_title_text="Click a legend entry to show/hide")
-    st.plotly_chart(fig,use_container_width=True,key="ny_chart_"+definition.id)
+    st.plotly_chart(fig,use_container_width=True,key="ny_chart_"+definition.id,
+        config={"toImageButtonOptions":{"format":"png","filename":"nyfed-"+definition.id.split(":")[-1],
+                "height":900,"width":1500,"scale":2}})
 
 
 def _load_nyfed():
@@ -241,8 +245,13 @@ def _load_nyfed():
     st.subheader("Daily chart observations")
     daily=pd.DataFrame(result.daily)
     st.dataframe(daily,use_container_width=True,hide_index=True,height=260)
+    from financial_intelligence_agent.live.charts import _safe_cell
+    safe_daily=daily.copy()
+    for col in safe_daily.columns:
+        safe_daily[col]=safe_daily[col].map(
+            lambda v:_safe_cell(v) if isinstance(v,str) else v)
     st.download_button("Download daily aggregates CSV",
-       daily.to_csv(index=False).encode("utf-8-sig"),"nyfed-daily.csv",
+       safe_daily.to_csv(index=False).encode("utf-8-sig"),"nyfed-daily.csv",
        mime="text/csv",key="ny_daily_download")
     st.subheader("Underlying publisher records (wide table)")
     details=pd.DataFrame(result.detail)

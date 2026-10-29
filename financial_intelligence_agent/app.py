@@ -19,7 +19,7 @@ from financial_intelligence_agent.tools.snapshot_insights import MacroSnapshot,F
 from financial_intelligence_agent.engine.operators import Point,Series,execute,OPERATOR_SPECS,dec,day
 from financial_intelligence_agent.engine.ml import ALGORITHMS,REGRESSORS,make_supervised,walk_forward
 from financial_intelligence_agent.agent.operator_planner import AnalyticalService
-from financial_intelligence_agent.live.studio import render as live_studio
+from financial_intelligence_agent.live.studio import render as live_studio, render_transformations
 import json
 
 st.set_page_config(page_title="Market Liquidity | Research Workbench",layout="wide",page_icon="◈")
@@ -77,10 +77,10 @@ def header(section,title,description):
 engine=make_engine()
 st.sidebar.markdown("### ◈ LIQUIDITY INTELLIGENCE")
 st.sidebar.caption("EXPERIMENTAL / RESEARCH WORKBENCH")
-page=st.sidebar.radio("Workspace",["Live Data Studio","Command center","Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"])
+page=st.sidebar.radio("Workspace",["Live Data Studio","Data transformations","Command center","Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"])
 st.sidebar.divider()
-if page=="Live Data Studio":
-    st.sidebar.success("LIVE ON-DEMAND SOURCES\n\nFRED · NY Fed · FDIC · Databricks Gold, where configured.")
+if page in ("Live Data Studio","Data transformations"):
+    st.sidebar.success("LIVE RESEARCH WORKSPACE\n\nFRED · NY Fed · FDIC · Databricks Gold, where configured.")
 else:
     st.sidebar.warning("HISTORICAL REFERENCE FIXTURE\n\nOct 2026 snapshot; not live.")
 st.sidebar.caption(f'{len(OPERATOR_SPECS)} deterministic operators · {len(ALGORITHMS)} registered ML algorithms')
@@ -88,6 +88,9 @@ st.sidebar.link_button("GitHub branch ↗","https://github.com/scottbanducci/fin
 
 if page=="Live Data Studio":
     live_studio()
+
+elif page=="Data transformations":
+    render_transformations()
 
 elif page=="Command center":
     header("01 / Macro overview","Market liquidity, decomposed",

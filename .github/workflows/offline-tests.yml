@@ -30,7 +30,7 @@ jobs:
           from streamlit.testing.v1 import AppTest
           app=AppTest.from_file("app.py",default_timeout=30).run()
           if app.exception: raise AssertionError(str(app.exception))
-          for target in ("Live Data Studio","Command center","Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"):
+          for target in ("Live Data Studio","Data transformations","Command center","Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"):
               app.sidebar.radio[0].set_value(target).run()
               if app.exception: raise AssertionError(target+": "+str(app.exception))
               print("Render succeeded:",target)
@@ -49,9 +49,14 @@ jobs:
               "test_sofr":{"series":x,"descriptor":dx,"retrieved":"fixture-test","warning":""},
               "test_effr":{"series":y,"descriptor":dy,"retrieved":"fixture-test","warning":""},
           }
+          app.sidebar.radio[0].set_value("Data transformations").run()
+          if app.exception: raise AssertionError("Transformation workspace loaded data: "+str(app.exception))
+          if not app.selectbox:
+              raise AssertionError("Operator-first workspace did not expose operator selector")
+          print("Data transformations and chart designer render with two typed time series")
           app.sidebar.radio[0].set_value("Live Data Studio").run()
-          if app.exception: raise AssertionError("Chart Studio loaded data: "+str(app.exception))
-          print("Interactive Chart Studio renders with two typed time series")
+          if app.exception: raise AssertionError("Source Studio loaded data: "+str(app.exception))
+          print("Source Studio persists the same typed datasets across navigation")
           PY
       - name: Build deployable OCI container
         run: docker build --progress=plain -t liquidity-workbench:test -f Dockerfile .

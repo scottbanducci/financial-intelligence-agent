@@ -493,8 +493,10 @@ def _operators():
     window=(st.number_input("Window (observations)",min_value=2,max_value=1000,
               value=20,key="series_op_window") if spec.windowed else 5)
     with st.expander("Output settings",expanded=False):
+        # Use a per-operator widget identity so changing the selected
+        # operator also updates the default output identifier.
         output_name=st.text_input("Save result as",value="derived_"+operator,
-                                  key="derived_key")
+                                  key="derived_key_"+operator)
         st.caption("Results remain in the current research session and can be used in later calculations.")
     if st.button("Calculate and save result",type="primary",key="calculate_operator"):
         try:

@@ -276,6 +276,19 @@ def bootstrap(path:str|Path=DB_DEFAULT,*,enable_network:bool=True)->dict:
         try:
             seed(db)
             states=dict(db.execute("SELECT name,value FROM crawl_state"))
+            # The pre-release crawler stored errors such as "A category
+            # request failed" in this same persistent SQLite database.
+            # An obsolete error cannot describe a release-based crawl.
+            if "category" in states.get("fred_error","").casefold():
+                db.execute("DELETE FROM crawl_state WHERE name='fred_error'")
+                states.pop("fred_error",None)
+            # Likewise, an old category-index completion flag cannot
+            # establish completeness of the new release/series census.
+            if (states.get("fred_complete")=="true"
+                    and states.get("fred_releases_loaded")!="true"):
+                db.execute("DELETE FROM crawl_state WHERE name='fred_complete'")
+                states.pop("fred_complete",None)
+            db.commit()
             if states.get("fred_complete")=="true" and states.get("fred_updated"):
                 try:
                     stale=(datetime.now(timezone.utc)-datetime.fromisoformat(states["fred_updated"])).total_seconds()>7*86400

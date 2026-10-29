@@ -77,6 +77,19 @@ class CatalogIndexTests(unittest.TestCase):
         self.assertEqual(report["counts"]["NYFED_PD"],1)
         self.assertEqual(lookup(self.db,"NYFED_PD:PDPOSMBS-TOT")["kind"],"series")
         self.assertEqual(report["counts"]["NYFED_DATASET"],7)
+    def test_migration_clears_old_category_error_without_erasing_series(self):
+        path=Path(self.temp.name)/"migration.sqlite"
+        db=get_connection(path)
+        seed(db)
+        db.execute("INSERT INTO crawl_state VALUES('fred_error','A category request failed; crawl can resume after restart')")
+        db.execute("INSERT INTO crawl_state VALUES('fred_complete','true')")
+        db.commit();db.close()
+        bootstrap(path,enable_network=False)
+        check=get_connection(path)
+        self.assertNotIn("fred_error",status(check)["state"])
+        self.assertNotIn("fred_complete",status(check)["state"])
+        self.assertIsNotNone(lookup(check,"FRED:SOFR"))
+        check.close()
     def test_bootstrap_stale_complete_resets_release_progress(self):
         path=Path(self.temp.name)/"fresh.sqlite"
         db=get_connection(path);seed(db)

@@ -58,8 +58,8 @@ class FredLongLabelsTests(unittest.TestCase):
         self.assertIn("scrollWidth - target.clientWidth",_SCROLL_SCRIPT)
         self.assertIn("prefers-reduced-motion",_SCROLL_SCRIPT)
         self.assertIn("[role=\"listbox\"][aria-label=\"Series\"]",_SCROLL_STYLE)
-        self.assertIn("100cqw - 100%",_SCROLL_STYLE)
-        self.assertIn("fred-label-pan",_SCROLL_STYLE)
+        self.assertIn("fred-label-viewport",_SCROLL_STYLE)
+        self.assertIn('tableCell = node.closest(".fred-label-viewport")',_SCROLL_SCRIPT)
 
 if __name__ == "__main__":
     unittest.main()

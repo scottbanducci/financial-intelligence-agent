@@ -59,24 +59,6 @@ _SCROLL_STYLE = r"""
 }
 .fred-label-viewport::-webkit-scrollbar { display: none; }
 .fred-label-text { display: inline-block; width: max-content; min-width: 100%; }
-@keyframes fred-label-pan {
-    0%, 4% { transform: translateX(0); }
-    86%, 100% {
-        /* Container query units account for each cell's actual width;
-           transform percentages refer to the full text width. */
-        transform: translateX(min(0px, calc(100cqw - 100%)));
-    }
-}
-.fred-label-viewport:hover .fred-label-text,
-.fred-label-viewport:focus-visible .fred-label-text {
-    animation: fred-label-pan var(--fred-pan-duration, 10s) linear alternate infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-    .fred-label-viewport:hover .fred-label-text,
-    .fred-label-viewport:focus-visible .fred-label-text {
-        animation: none;
-    }
-}
 .fred-label-viewport:hover, .fred-label-viewport:focus-visible {
     outline: 1px solid var(--primary-color, #66c8d0);
     outline-offset: 2px;
@@ -120,7 +102,10 @@ _SCROLL_SCRIPT = r"""
 
   function viewportFrom(node) {
     if (!(node instanceof Element)) return null;
-    // Metadata cells use native CSS animation, avoiding pointerout races.
+    // Source table cells may lose CSS :hover while Streamlit recomputes
+    // layout; continue their scrolling until complete even if that occurs.
+    const tableCell = node.closest(".fred-label-viewport");
+    if (tableCell) return tableCell;
     const option = node.closest('[role="option"]');
     if (!option) return null;
     const listbox = option.closest('[role="listbox"][aria-label="Series"]');
@@ -146,7 +131,16 @@ _SCROLL_SCRIPT = r"""
         const progress = Math.min(1, (timestamp - started) / duration);
         target.scrollLeft = overflow * progress;
         if (progress < 1) animation = window.requestAnimationFrame(step);
-        else animation = null;
+        else {
+          animation = null;
+          if (target.classList.contains("fred-label-viewport")) {
+            // Reset shortly after finishing, unless the reader moved to
+            // another label. The animation is never tied to network state.
+            window.setTimeout(() => {
+              if (active === target && !target.matches(":hover")) stop(true);
+            }, 1600);
+          }
+        }
       }
       animation = window.requestAnimationFrame(step);
     }, 350);
@@ -159,6 +153,11 @@ _SCROLL_SCRIPT = r"""
     if (!active) return;
     const current = viewportFrom(event.target);
     if (current !== active) return;
+    if (active.classList.contains("fred-label-viewport")) {
+      // Text/canvas overlays can emit a synthetic pointerout while the user
+      // is still reading. Keep the table cell's scroll in progress.
+      return;
+    }
     const next = event.relatedTarget;
     if (next instanceof Element && viewportFrom(next) === active) return;
     stop(true);

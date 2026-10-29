@@ -98,25 +98,10 @@ def main():
                 viewport.hover()
                 meta_initial=viewport.evaluate("el => ({width:el.clientWidth, scroll:el.scrollWidth})")
                 assert meta_initial["scroll"]>meta_initial["width"]+20,meta_initial
-                text_span=viewport.locator(".fred-label-text")
-                diagnosis=lambda:viewport.evaluate("""el => {
-                    const child=el.querySelector('.fred-label-text');
-                    const style=getComputedStyle(child);
-                    const parent=getComputedStyle(el);
-                    return {hover:el.matches(':hover'), animation:style.animationName,
-                            playState:style.animationPlayState, transform:style.transform,
-                            containerType:parent.containerType, overflow:parent.overflowX,
-                            elWidth:el.clientWidth, textWidth:child.getBoundingClientRect().width,
-                            scrollWidth:el.scrollWidth};
-                }""")
-                print("DEBUG before metadata hover:",diagnosis(),flush=True)
-                initial_x=text_span.evaluate("el => el.getBoundingClientRect().left")
                 page.wait_for_timeout(3500)
-                print("DEBUG after metadata hover:",diagnosis(),flush=True)
-                moved_x=text_span.evaluate("el => el.getBoundingClientRect().left")
-                travel=initial_x-moved_x
-                assert travel>15,f"Metadata CSS text did not pan on hover: {travel}"
-                print("PASS: metadata label pans horizontally on hover",travel)
+                meta_distance=viewport.evaluate("el => el.scrollLeft")
+                assert meta_distance>15,f"Metadata label did not scroll on hover: {meta_distance}"
+                print("PASS: metadata label scrolls horizontally on hover",meta_distance)
             finally:browser.close()
     finally:
         server.terminate()

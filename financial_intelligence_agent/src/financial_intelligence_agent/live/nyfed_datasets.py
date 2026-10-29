@@ -222,12 +222,28 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
                 typ=str(row["operationType"])
                 group=typ if d.operation_filter is None else "Total "+d.operation_filter
                 value=_value(row,("totalAmtAccepted",))
-                # Break down by security type only if amount is genuinely
-                # attributable. Do not double count a combined/tranche record.
-                security=row.get("securityType")
-                if d.operation_filter is not None and isinstance(security,str) and security.strip():
-                    security_breakdown[security][observed]+=value
-                    have_breakdown=True
+                # NY Fed repo.operations[].details[] attributes auction
+                # accepted amounts to individual security classes. The
+                # operation-level total must NOT be credited in full to
+                # every class. Validate complete reconciliation before adding
+                # the security split for this operation.
+                if d.operation_filter is not None:
+                    details=row.get("details")
+                    if isinstance(details,list) and details:
+                        allocations=[]
+                        for part in details:
+                            if not isinstance(part,dict) or not str(part.get("securityType","")).strip():
+                                allocations=[];break
+                            numeric=dec(part.get("amtAccepted"))
+                            if numeric is None:allocations=[];break
+                            allocations.append((str(part["securityType"]),numeric))
+                        if allocations and sum((v for _,v in allocations),Decimal(0))==value:
+                            for security,allocated in allocations:
+                                security_breakdown[security][observed]+=allocated
+                            have_breakdown=True
+                    elif isinstance(row.get("securityType"),str) and row["securityType"].strip():
+                        security_breakdown[row["securityType"]][observed]+=value
+                        have_breakdown=True
                 unit="USD"
             elif d.mode=="treasury":
                 typ=str(row.get("operationDirection","")).upper()
@@ -251,7 +267,7 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
                 grouped["Security: "+name]=points
             warnings.append("Security-type lines are included only where an operation reports a directly attributable securityType; they need not sum to the total if some operations lack that field.")
         if d.mode=="repo" and d.operation_filter is not None and not have_breakdown:
-            warnings.append("The publisher did not provide an attributable securityType amount for these operation records; displaying totals only, not inventing breakdowns.")
+            warnings.append("No reconciled per-security accepted amounts were available; totals only, without a fabricated security breakdown.")
         if d.mode=="swaps":warnings.append("Currencies remain separate. Never sum or equate volumes in different currencies.")
         if d.mode=="operations" and len(grouped)>1:
             totals:dict[date,Decimal]=defaultdict(Decimal)

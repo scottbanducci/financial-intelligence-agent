@@ -38,6 +38,29 @@ class NYFedDatasets(unittest.TestCase):
         reverse=fetch_dataset("NYFED_DATASET:RP_RRP",self.A,self.B,fetch=fetch)
         self.assertEqual(len(reverse.detail),1)
         self.assertEqual(reverse.series["Total Reverse Repo"].points[0].value,Decimal("500"))
+    def test_nested_repo_security_type_allocations_reconcile(self):
+        body={"repo":{"operations":[
+            {"operationDate":self.A,"operationType":"Repo",
+             "totalAmtAccepted":"120","details":[
+                 {"securityType":"tsy","amtAccepted":"80"},
+                 {"securityType":"mbs","amtAccepted":"40"}]},
+            {"operationDate":self.A,"operationType":"Repo",
+             "totalAmtAccepted":"30","details":[
+                 {"securityType":"tsy","amtAccepted":"30"}]}]}}
+        r=fetch_dataset("NYFED_DATASET:RP_REPO",self.A,self.B,
+          fetch=mocked(body,"rp/results/search.json"))
+        self.assertEqual(r.series["Total Repo"].points[0].value,Decimal(150))
+        self.assertEqual(r.series["Security: tsy"].points[0].value,Decimal(110))
+        self.assertEqual(r.series["Security: mbs"].points[0].value,Decimal(40))
+    def test_unreconciled_nested_repo_amounts_omitted_not_doubled(self):
+        body={"repo":{"operations":[
+            {"operationDate":self.A,"operationType":"Repo",
+             "totalAmtAccepted":"120","details":[
+                 {"securityType":"tsy","amtAccepted":"80"}]}]}}
+        r=fetch_dataset("NYFED_DATASET:RP_REPO",self.A,self.B,
+          fetch=mocked(body,"rp/results/search.json"))
+        self.assertEqual(set(r.series),{"Total Repo"})
+        self.assertTrue(any("reconciled" in note for note in r.warnings))
     def test_am_bs_aggregate_by_operation_type_and_total(self):
         body={"ambs":{"operations":[
             {"operationDate":self.A,"operationType":"Outright Purchase","totalAmtAcceptedPar":"100"},

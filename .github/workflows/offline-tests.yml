@@ -54,6 +54,16 @@ jobs:
           if not app.selectbox:
               raise AssertionError("Operator-first workspace did not expose operator selector")
           print("Data transformations and chart designer render with two typed time series")
+          selector=next(item for item in app.selectbox if item.key=="series_operation")
+          selector.set_value("subtract").run()
+          compute=next(item for item in app.button if item.key=="calculate_operator")
+          compute.click().run()
+          if app.exception:
+              raise AssertionError("Operator computation UI: "+str(app.exception))
+          saved=app.session_state["analyst_workspace"]
+          if "derived_subtract" not in saved:
+              raise AssertionError("Operator-first computation did not persist the derived dataset")
+          print("Operator-first UI computes a derived dataset and saves it across pages")
           app.sidebar.radio[0].set_value("Live Data Studio").run()
           if app.exception: raise AssertionError("Source Studio loaded data: "+str(app.exception))
           print("Source Studio persists the same typed datasets across navigation")

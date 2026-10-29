@@ -28,6 +28,8 @@ class FredLongLabelsTests(unittest.TestCase):
         self.assertIn('class="fred-label-viewport"', rendered)
         self.assertIn('tabindex="0"', rendered)
         self.assertIn("Millions of USD",rendered)
+        self.assertIn("--fred-pan-duration:",rendered)
+        self.assertIn("fred-label-text",rendered)
 
     def test_publisher_labels_are_escaped_in_text_and_attributes(self):
         attack = '<img src=x onerror="alert(1)">&'
@@ -56,6 +58,8 @@ class FredLongLabelsTests(unittest.TestCase):
         self.assertIn("scrollWidth - target.clientWidth",_SCROLL_SCRIPT)
         self.assertIn("prefers-reduced-motion",_SCROLL_SCRIPT)
         self.assertIn("[role=\"listbox\"][aria-label=\"Series\"]",_SCROLL_STYLE)
+        self.assertIn("100cqw - 100%",_SCROLL_STYLE)
+        self.assertIn("fred-label-pan",_SCROLL_STYLE)
 
 if __name__ == "__main__":
     unittest.main()

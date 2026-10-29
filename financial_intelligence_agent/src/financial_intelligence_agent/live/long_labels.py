@@ -53,11 +53,30 @@ _SCROLL_STYLE = r"""
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
+    container-type: inline-size;
     scrollbar-width: none;
     -ms-overflow-style: none;
 }
 .fred-label-viewport::-webkit-scrollbar { display: none; }
-.fred-label-text { display: inline-block; min-width: 100%; }
+.fred-label-text { display: inline-block; width: max-content; min-width: 100%; }
+@keyframes fred-label-pan {
+    0%, 12% { transform: translateX(0); }
+    86%, 100% {
+        /* Container query units account for each cell's actual width;
+           transform percentages refer to the full text width. */
+        transform: translateX(min(0px, calc(100cqw - 100%)));
+    }
+}
+.fred-label-viewport:hover .fred-label-text,
+.fred-label-viewport:focus-visible .fred-label-text {
+    animation: fred-label-pan var(--fred-pan-duration, 10s) linear alternate infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .fred-label-viewport:hover .fred-label-text,
+    .fred-label-viewport:focus-visible .fred-label-text {
+        animation: none;
+    }
+}
 .fred-label-viewport:hover, .fred-label-viewport:focus-visible {
     outline: 1px solid var(--primary-color, #66c8d0);
     outline-offset: 2px;
@@ -101,8 +120,7 @@ _SCROLL_SCRIPT = r"""
 
   function viewportFrom(node) {
     if (!(node instanceof Element)) return null;
-    const tableCell = node.closest(".fred-label-viewport");
-    if (tableCell) return tableCell;
+    // Metadata cells use native CSS animation, avoiding pointerout races.
     const option = node.closest('[role="option"]');
     if (!option) return null;
     const listbox = option.closest('[role="listbox"][aria-label="Series"]');
@@ -145,13 +163,6 @@ _SCROLL_SCRIPT = r"""
     if (next instanceof Element && viewportFrom(next) === active) return;
     stop(true);
   }, true);
-  document.addEventListener("focusin", function (event) {
-    const target = viewportFrom(event.target);
-    if (target && target.classList.contains("fred-label-viewport")) start(target);
-  }, true);
-  document.addEventListener("focusout", function (event) {
-    if (viewportFrom(event.target) === active) stop(true);
-  }, true);
 })();
 </script>
 """
@@ -182,10 +193,14 @@ def metadata_html(rows: Sequence[Mapping[str, object]]) -> str:
         label = escape(str(row.get("label", "")), quote=True)
         frequency = escape(str(row.get("frequency", "")), quote=True)
         unit = escape(str(row.get("unit", "")), quote=True)
+        # The longer a label, the longer the pan duration. The distance
+        # itself is computed by CSS using the rendered cell width.
+        seconds = min(36, max(7, len(str(row.get("label", ""))) / 22))
         output.append(
             '<tr><td class="fred-id-cell">' + identifier + '</td>'
             '<td class="fred-name-cell"><div class="fred-label-viewport" '
-            'tabindex="0" title="' + label + '">'
+            'tabindex="0" title="' + label + '" '
+            'style="--fred-pan-duration:' + f'{seconds:.1f}s' + '">'
             '<span class="fred-label-text">' + label + '</span></div></td>'
             '<td class="fred-frequency-cell">' + frequency + '</td>'
             '<td class="fred-unit-cell">' + unit + '</td></tr>'

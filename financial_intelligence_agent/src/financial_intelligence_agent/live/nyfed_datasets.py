@@ -291,7 +291,7 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
         if d.mode=="repo" and d.operation_filter is not None and not have_breakdown:
             warnings.append("No reconciled per-security accepted amounts were available; totals only, without a fabricated security breakdown.")
         if d.mode=="swaps":warnings.append("Currencies remain separate. Never sum or equate volumes in different currencies.")
-        if d.mode=="operations" and len(grouped)>1:
+        if d.mode=="operations" and grouped:
             totals:dict[date,Decimal]=defaultdict(Decimal)
             for values in grouped.values():
                 for observed,value in values.items():totals[observed]+=value

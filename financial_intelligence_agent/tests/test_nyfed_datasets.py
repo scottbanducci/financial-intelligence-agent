@@ -76,6 +76,12 @@ class NYFedDatasets(unittest.TestCase):
         self.assertEqual(r.series["Outright Purchase"].points[0].value,Decimal(130))
         self.assertEqual(r.series["All operation types"].points[0].value,Decimal(200))
         self.assertEqual(len(r.detail),3)
+    def test_am_bs_total_available_even_for_one_operation_type(self):
+        body={"ambs":{"auctions":[
+            {"operationDate":self.A,"operationType":"Dollar Roll","totalAmtAcceptedPar":"9"}]}}
+        r=fetch_dataset("NYFED_DATASET:AMBS",self.A,self.B,
+             fetch=mocked(body,"ambs/all/results/summary/search.json"))
+        self.assertEqual(r.series["All operation types"].points[0].value,Decimal(9))
     def test_treasury_purchases_sales_only(self):
         body={"treasury":{"auctions":[
             {"operationDate":self.A,"operationDirection":"P","totalParAmtAccepted":"45"},

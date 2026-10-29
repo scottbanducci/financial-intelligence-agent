@@ -20,7 +20,7 @@ jobs:
       - name: Install app and Playwright
         run: |
           python -m pip install -r requirements.txt
-          python -m pip install playwright>=1.55,<2
+          python -m pip install 'playwright>=1.55,<2'
           python -m playwright install --with-deps chromium
       - name: Verify real hover scrolling in browser
         run: python scripts/check_fred_label_hover.py

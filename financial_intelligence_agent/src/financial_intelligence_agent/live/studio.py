@@ -22,7 +22,7 @@ from financial_intelligence_agent.live.fdic import bank_financial,FIELDS
 from financial_intelligence_agent.live.providers import fetch_series,Descriptor
 from financial_intelligence_agent.live.workspaces import export_workspace,import_workspace
 from financial_intelligence_agent.live.charts import (
-    ChartSpec,prepare,interactive_chart,image_bytes,csv_bytes,metadata_bytes,MODES,STYLES,research_bundle_bytes,chart_recipe_bytes,load_chart_recipe)
+    ChartSpec,prepare,interactive_chart,preview_figure,image_bytes,csv_bytes,metadata_bytes,MODES,STYLES,research_bundle_bytes,chart_recipe_bytes,load_chart_recipe)
 from financial_intelligence_agent.engine.operators import Series,execute,OPERATOR_SPECS
 from financial_intelligence_agent.engine.alerts import Rule,evaluate,COMPARES
 from financial_intelligence_agent.engine.normalization import convert_units,resample,align_date_convention,UNITS,ORDER,AGGREGATIONS
@@ -49,6 +49,54 @@ def _add(key:str,series:Series,descriptor:Descriptor,retrieved:str="",warnings:s
         series=replace(series,key=key)
     _state()[key]={"series":series,"descriptor":descriptor,
                    "retrieved":retrieved,"warning":warnings}
+
+def _publication_buttons(frame:pd.DataFrame,spec:ChartSpec,unit:str,
+                         chosen:dict[str,Series],warnings:list[str],*,prefix:str)->None:
+    """Reusable chart publication downloads for source previews and transformed charts."""
+    st.markdown("#### Export publication assets")
+    a,b,c,d=st.columns(4)
+    a.download_button("Download CSV",csv_bytes(frame),
+                      file_name=f"{prefix}-chart.csv",mime="text/csv",
+                      key=prefix+"_csv")
+    b.download_button("Download PNG",image_bytes(frame,spec,unit,"png"),
+                      file_name=f"{prefix}-chart.png",mime="image/png",
+                      key=prefix+"_png")
+    c.download_button("Download SVG",image_bytes(frame,spec,unit,"svg"),
+                      file_name=f"{prefix}-chart.svg",mime="image/svg+xml",
+                      key=prefix+"_svg")
+    d.download_button("Chart provenance JSON",metadata_bytes(chosen,spec,unit,warnings),
+                      file_name=f"{prefix}-provenance.json",
+                      mime="application/json",key=prefix+"_meta")
+    p,q=st.columns(2)
+    p.download_button("Download full research bundle (.zip)",
+                      research_bundle_bytes(frame,spec,unit,chosen,warnings),
+                      file_name=f"{prefix}-research.zip",mime="application/zip",
+                      key=prefix+"_bundle")
+    q.download_button("Save reusable chart recipe (.json)",
+                      chart_recipe_bytes(chosen,spec),
+                      file_name=f"{prefix}-recipe.json",
+                      mime="application/json",key=prefix+"_recipe")
+    st.caption("Exports include a labeled date axis, the chart's unit, source attribution and vintage caveats.")
+
+
+def _source_publication(sources:dict[str,Series],*,title:str,subtitle:str,
+                        prefix:str,style:str="Line")->None:
+    """Offer a consistent publication pack for a visible source preview.
+
+    A source figure with separate incompatible axes (NY Fed rates/volumes)
+    offers source-native Plotly download for the combined view and separate
+    rate/volume publication packs rather than mislabeling a single axis.
+    """
+    if not sources:return
+    note="; ".join(dict.fromkeys(s.source for s in sources.values()))
+    spec=ChartSpec(title[:140],subtitle[:250],style=style,
+                   source_note=note,footnote="Publisher observation dates; historical release/vintage times not verified.")
+    try:
+        frame,unit,warnings=prepare(sources,spec)
+        _publication_buttons(frame,spec,unit,sources,warnings,prefix=prefix)
+    except Exception as exc:
+        st.warning("Cannot prepare source publication assets: "+str(exc))
+
 
 def _load_fred():
     st.markdown("#### FRED · release and series discovery")
@@ -106,8 +154,17 @@ def _load_fred():
         series=_state()[recent]["series"]
         frame=pd.DataFrame([{"date":p.date,"value":float(p.value) if p.value is not None else None}
                             for p in series.points]).set_index("date")
-        st.line_chart(frame,y_label=series.unit)
+        label=_state()[recent]["descriptor"].label
+        st.caption("Displaying "+label+" · "+recent)
+        fig=preview_figure(series,label)
+        st.plotly_chart(fig,use_container_width=True,theme=None,
+            key="fred_preview",config={"toImageButtonOptions":{
+                "format":"png","filename":"fred-series","height":900,"width":1500,"scale":2}})
+        st.caption("Y-axis automatically follows the observed range rather than starting at zero.")
         st.dataframe(frame.tail(200),use_container_width=True)
+        _source_publication({recent:series},title=label,
+                            subtitle="FRED published observations · "+series.frequency,
+                            prefix="fred-source")
     st.caption("FRED observation values are latest-vintage API results; release listing is metadata, not evidence of historical availability.")
 
 
@@ -232,8 +289,12 @@ def _load_nyfed():
         if item is None:return
         series=item["series"]
         frame=pd.DataFrame([{"Date":p.date,"Value":float(p.value)} for p in series.points])
-        st.line_chart(frame.set_index("Date"),y_label=series.unit)
+        st.plotly_chart(preview_figure(series,item["descriptor"].label),
+                        use_container_width=True,theme=None,key="nydealer_preview")
         st.dataframe(frame.tail(250),use_container_width=True,hide_index=True)
+        _source_publication({loaded["id"]:series},title=item["descriptor"].label,
+                            subtitle="NY Fed primary dealer historical series",
+                            prefix="nydealer-source")
         st.download_button("Download dealer series CSV",
             frame.to_csv(index=False).encode("utf-8-sig"),"nyfed-dealer-series.csv",
             mime="text/csv",key="nydealer_csv")
@@ -266,6 +327,29 @@ def _load_nyfed():
     st.download_button("Download complete underlying records CSV",
         export.to_csv(index=False).encode("utf-8-sig"),
         "nyfed-record-level-data.csv",mime="text/csv",key="ny_detail_download")
+    # Keep the original operation table beneath the publisher chart, and
+    # expose the same publication asset pack available for transformed data.
+    with st.expander("Export publication assets",expanded=False):
+        if result.definition.mode=="rates":
+            family=st.radio("Publication series",["Rates (%)","Volume (USD billions)"],
+                            horizontal=True,key="ny_publication_family")
+            selected=result.series if family.startswith("Rates") else result.volume
+            chart_style="Line" if family.startswith("Rates") else "Bar"
+        elif result.definition.mode=="swaps":
+            currency=st.selectbox("Export one currency",list(result.series),
+                                  key="ny_export_currency")
+            selected={currency:result.series[currency]}
+            chart_style="Line"
+        else:
+            selected=result.series
+            chart_style="Line"
+        _source_publication(selected,title=result.definition.label,
+             subtitle="NY Fed daily publisher observations · "+result.retrieved_at[:10],
+             prefix="nyfed-source",style=chart_style)
+        if result.definition.mode=="rates":
+            st.caption("The Plotly chart toolbar exports the combined dual-axis figure. "+
+                       "These high-resolution publication files export rates and volumes "+
+                       "separately to preserve their different units.")
 
 
 def _load_fdic():

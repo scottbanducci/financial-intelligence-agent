@@ -222,7 +222,7 @@ def _load_nyfed():
         item=_state().get(loaded["id"])
         if item is None:return
         series=item["series"]
-        frame=pd.DataFrame([{"Date":p.date,"Value":float(p.value) for p in series.points])
+        frame=pd.DataFrame([{"Date":p.date,"Value":float(p.value)} for p in series.points])
         st.line_chart(frame.set_index("Date"),y_label=series.unit)
         st.dataframe(frame.tail(250),use_container_width=True,hide_index=True)
         st.download_button("Download dealer series CSV",

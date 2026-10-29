@@ -178,8 +178,8 @@ def metadata_html(rows: Sequence[Mapping[str, object]]) -> str:
     """Build an escaped, scrollable table of FRED metadata (max 75 entries).
 
     Escaping source-provided labels protects the application from malicious
-    publisher strings. The full label is also available through title and
-    keyboard focus, even if animation is disabled by reduced-motion settings.
+    publisher strings. The full label is also available to assistive technology through aria-label
+    and keyboard focus, even if animation is disabled by reduced-motion settings.
     """
     headers = ("ID", "Label", "Frequency", "Unit")
     classes = ("fred-id-cell", "fred-name-cell", "fred-frequency-cell", "fred-unit-cell")
@@ -199,7 +199,7 @@ def metadata_html(rows: Sequence[Mapping[str, object]]) -> str:
         output.append(
             '<tr><td class="fred-id-cell">' + identifier + '</td>'
             '<td class="fred-name-cell"><div class="fred-label-viewport" '
-            'tabindex="0" title="' + label + '" '
+            'tabindex="0" aria-label="' + label + '" '
             'style="--fred-pan-duration:' + f'{seconds:.1f}s' + '">'
             '<span class="fred-label-text">' + label + '</span></div></td>'
             '<td class="fred-frequency-cell">' + frequency + '</td>'

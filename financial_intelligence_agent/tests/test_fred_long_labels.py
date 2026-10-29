@@ -24,7 +24,7 @@ class FredLongLabelsTests(unittest.TestCase):
             "unit": "Millions of USD",
         }])
         self.assertIn(long_label, rendered)
-        self.assertIn('title="' + long_label + '"', rendered)
+        self.assertIn('aria-label="' + long_label + '"', rendered)
         self.assertIn('class="fred-label-viewport"', rendered)
         self.assertIn('tabindex="0"', rendered)
         self.assertIn("Millions of USD",rendered)

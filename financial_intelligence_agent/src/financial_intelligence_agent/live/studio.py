@@ -14,14 +14,12 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from financial_intelligence_agent.live.nyfed_explorer import discover as discover_nyfed,records_from_path,map_series
-from financial_intelligence_agent.live.catalog_index import get_connection,search as catalog_search,status as catalog_status
-from financial_intelligence_agent.live.operations import aggregate_operations,metric_options,operation_types
+from financial_intelligence_agent.live.catalog_index import get_connection,search as catalog_search,status as catalog_status,release_list
+from financial_intelligence_agent.live.nyfed_datasets import fetch_dataset,BY_ID
 from financial_intelligence_agent.live.panels import fetch_bank_panel,contraction_breadth
 from financial_intelligence_agent.live.databricks_gold import read_gold,descriptors as gold_descriptors
 from financial_intelligence_agent.live.fdic import bank_financial,FIELDS
-from financial_intelligence_agent.live.providers import (
-    catalog,fetch_series,dealer_catalog,Descriptor,FetchResult,FRED_PRESETS)
+from financial_intelligence_agent.live.providers import fetch_series,Descriptor
 from financial_intelligence_agent.live.workspaces import export_workspace,import_workspace
 from financial_intelligence_agent.live.charts import (
     ChartSpec,prepare,interactive_chart,image_bytes,csv_bytes,metadata_bytes,MODES,STYLES,research_bundle_bytes,chart_recipe_bytes,load_chart_recipe)
@@ -34,10 +32,6 @@ from financial_intelligence_agent.agent.operator_planner import AnalyticalServic
 @st.cache_data(ttl=900,max_entries=80,show_spinner=False)
 def _cached_fetch(series_id:str,start:str,end:str):
     return fetch_series(series_id,start,end)
-
-@st.cache_data(ttl=3600,max_entries=1,show_spinner=False)
-def _cached_dealers():
-    return dealer_catalog()
 
 def _state():
     if "analyst_workspace" not in st.session_state:
@@ -56,99 +50,208 @@ def _add(key:str,series:Series,descriptor:Descriptor,retrieved:str="",warnings:s
     _state()[key]={"series":series,"descriptor":descriptor,
                    "retrieved":retrieved,"warning":warnings}
 
-def _load_public_series():
-    st.markdown("#### Unified publisher data search")
+def _load_fred():
+    st.markdown("#### FRED · release and series discovery")
+    st.caption("All FRED releases and every release's paginated series are indexed in a background worker. Search runs locally; a fresh index may be incomplete until crawling finishes.")
     with closing(get_connection()) as db:
-        state=catalog_status(db)
-        query=st.text_input("Search locally indexed financial data series",
-                            placeholder="Treasury positions, SOFR, reserves, dealer financing, repo ...",
-                            key="global_series_search")
-        results=catalog_search(db,query,limit=150)
-    count=sum(state["counts"].values())
-    progress=state["fred_categories"]
-    complete=state["state"].get("fred_complete")=="true"
-    st.caption(f"{count:,} indexed datasets/endpoint templates. NY Fed metadata and FRED category pages are fetched at app startup, then searched locally.")
-    if not complete:
-        st.info("FRED catalog crawl is still pending or incomplete. Discovered records remain searchable; this is not yet an exhaustive FRED index.")
-    if state["state"].get("fred_error"):
-        st.caption("FRED discovery: "+state["state"]["fred_error"])
-    if state["state"].get("ny_spec_error"):
-        st.caption("NY Fed OpenAPI discovery: "+state["state"]["ny_spec_error"])
-    if not results:
-        st.info("No indexed match. Try another term; the full index may still be warming.")
+        report=catalog_status(db)
+        releases=release_list(db)
+        count=report["counts"].get("FRED",0)
+    progressed=report["fred_releases"]
+    total=sum(progressed.values())
+    done=progressed.get("done",0)
+    st.caption(f"{count:,} known FRED series • {done:,}/{total:,} releases indexed • "+
+               ("Complete" if report["state"].get("fred_complete")=="true" else "Indexing / incomplete"))
+    error=report["state"].get("fred_error")
+    if error:st.warning("Catalog: "+error)
+    if total and done<total:
+        st.progress(done/total,text=f"Indexed {done} of {total} FRED releases")
+    options=[None,*releases]
+    selected_release=st.selectbox("Browse by release",options,
+        format_func=lambda r:"All releases" if r is None else f'{r["name"]} ({r["series"]} indexed)',
+        key="fred_release_selected")
+    query=st.text_input("Search FRED series by name, identifier or release",
+        placeholder="e.g. H.8, commercial bank credit, SOFR",key="fred_series_search")
+    with closing(get_connection()) as db:
+        matches=catalog_search(db,query,provider="FRED",
+            release_id=selected_release["id"] if selected_release is not None else None,limit=150)
+    if not matches:
+        st.info("No indexed series match. The release may still be indexing, or the search is too specific.")
         return
-    choice=st.selectbox(
-        "Select a series or published endpoint",
-        options=results,
-        format_func=lambda item:f'{item["provider"]} · {item["label"]} [{item["id"]}]'[:210],
-        key="global_index_result")
-    details=pd.DataFrame([{k:item[k] for k in ("id","label","provider","frequency","unit","kind")}
-                         for item in results[:80]])
-    with st.expander("Search result metadata",expanded=False):
-        st.dataframe(details,hide_index=True,use_container_width=True)
-    x,y=st.columns(2)
-    start=x.date_input("From",date.today()-timedelta(days=365*3),key="global_search_start")
-    end=y.date_input("Through",date.today(),key="global_search_end")
-    kind=choice["kind"];series_id=choice["id"]
-    if kind=="endpoint_template":
-        st.caption("This is a publisher API endpoint definition. It may need path parameters before retrieving its records.")
-        endpoint=choice["endpoint"]
-        placeholders=list(dict.fromkeys(re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}",endpoint)))
-        substitutions={}
-        for param in placeholders:
-            substitutions[param]=st.text_input(
-                "Required endpoint parameter: "+param,
-                key="endpoint_parameter_"+param)
-        if st.button("Use this NY Fed endpoint",key="indexed_endpoint_choice"):
-            try:
-                for name,value in substitutions.items():
-                    if not re.fullmatch(r"[A-Za-z0-9_-]{1,60}",value):
-                        raise ValueError("Supply a valid alphanumeric value for "+name)
-                    endpoint=endpoint.replace("{"+name+"}",value)
-                from financial_intelligence_agent.live.nyfed_explorer import validate_endpoint
-                endpoint=validate_endpoint(endpoint)
-                st.session_state["nyfed_endpoint_suggestion"]=endpoint
-                st.success("Endpoint selected. Open 'Other NY Fed APIs' below to load and examine publisher data.")
-            except Exception as exc:
-                st.error("Endpoint parameters unavailable: "+str(exc))
-        return
-    if st.button("Retrieve series observations",type="primary",key="indexed_fetch"):
+    chosen=st.selectbox("Series",matches,
+        format_func=lambda item:f'{item["label"]} · {item["id"][5:]} ({item["frequency"]}, {item["unit"]})',
+        key="fred_series_item")
+    if len(matches)==150:st.caption("Showing the first 150 matches. Refine your search to narrow the results.")
+    with st.expander("Metadata for indexed series"):
+        st.dataframe(pd.DataFrame(matches[:75])[["id","label","frequency","unit"]],
+                     use_container_width=True,hide_index=True)
+    a,b=st.columns(2)
+    start=a.date_input("From",date.today()-timedelta(days=365*4),key="fred_range_start")
+    end=b.date_input("Through",date.today(),key="fred_range_end")
+    if st.button("Load FRED observations",type="primary",key="fred_load_observations"):
         try:
-            with st.spinner("Loading the selected publisher data"):
-                if series_id.startswith("NYFED_PD:"):
-                    from financial_intelligence_agent.live.providers import dealer
-                    result=dealer(series_id[len("NYFED_PD:"):],
-                                  start.isoformat(),end.isoformat())
-                else:
-                    result=_cached_fetch(series_id,start.isoformat(),end.isoformat())
-            desc=Descriptor(series_id,choice["label"],choice["provider"],
-                            choice["unit"],choice["frequency"],choice["category"],
-                            choice["source_url"],choice["convention"])
-            converted=replace(result.series,key=series_id,
-                              unit=desc.unit,frequency=desc.frequency)
-            _add(series_id,converted,desc,result.retrieved_at,result.warning)
-            st.success(f"Loaded {len(converted.points):,} observations for {desc.label}")
-            frame=pd.DataFrame([{"Observation date":p.date,"Value":float(p.value) if p.value is not None else None}
-                                for p in converted.select().points]).set_index("Observation date")
-            st.line_chart(frame,y_label=desc.unit)
-            st.dataframe(frame.tail(100),use_container_width=True)
-        except Exception as exc:
-            st.error("Source retrieval failed; no demo data substituted: "+str(exc))
-    st.caption("FRED keys are loaded exclusively from server-side configuration. No API credentials are accepted in the browser.")
-    if query and len(results)>=150:
-        st.caption("Showing the first 150 local matches; refine your keywords to narrow the list.")
+            with st.spinner("Loading FRED data; using the private server API key"):
+                found=_cached_fetch(chosen["id"],start.isoformat(),end.isoformat())
+            descriptor=Descriptor(chosen["id"],chosen["label"],"FRED",
+                chosen["unit"],chosen["frequency"],chosen["category"],
+                chosen["source_url"],chosen["convention"])
+            series=replace(found.series,key=chosen["id"],unit=descriptor.unit,
+                           frequency=descriptor.frequency)
+            _add(chosen["id"],series,descriptor,found.retrieved_at,found.warning)
+            st.session_state["fred_last_result"]=chosen["id"]
+            st.success(f"Loaded {len(series.points):,} published observations")
+        except Exception as exc:st.error("FRED series request failed: "+str(exc))
+    recent=st.session_state.get("fred_last_result")
+    if recent in _state():
+        series=_state()[recent]["series"]
+        frame=pd.DataFrame([{"date":p.date,"value":float(p.value) if p.value is not None else None}
+                            for p in series.points]).set_index("date")
+        st.line_chart(frame,y_label=series.unit)
+        st.dataframe(frame.tail(200),use_container_width=True)
+    st.caption("FRED observation values are latest-vintage API results; release listing is metadata, not evidence of historical availability.")
 
 
-def _load_dealers():
-    st.markdown("#### Primary-dealer statistical series")
-    with closing(get_connection()) as db:
-        items=catalog_search(db,"NYFED_PD:",limit=250)
-        count=db.execute("SELECT COUNT(*) FROM entries WHERE provider='NYFED_PD'").fetchone()[0]
-    st.caption(f"{count:,} individual publisher series indexed at startup. Search by topic or series ID in Unified Publisher Search above.")
-    if not count:
-        st.info("Primary-dealer metadata is being loaded. Return to this tab when the startup index finishes.")
+@st.cache_data(ttl=900,max_entries=60,show_spinner=False)
+def _fetch_ny_dataset(dataset_id:str,start:str,end:str):
+    return fetch_dataset(dataset_id,start,end)
+
+def _show_ny_chart(result):
+    import plotly.graph_objects as go
+    definition=result.definition
+    if definition.mode=="swaps":
+        # Different currencies are separate physical units: separate axes and
+        # charts rather than misleading mixed-currency dollar comparisons.
+        for name,series in result.series.items():
+            fig=go.Figure()
+            fig.add_trace(go.Scatter(x=[p.date for p in series.points],
+                                     y=[float(p.value) for p in series.points],
+                                     mode="lines+markers",name=name))
+            fig.update_layout(title=f"{definition.label} · {name}",
+                xaxis_title="Operation date",yaxis_title=f"Amount ({name})",
+                template="plotly_dark",height=320)
+            st.plotly_chart(fig,use_container_width=True,key="nyfx_"+series.key)
+        return
+    fig=go.Figure()
+    if definition.mode=="rates":
+        for typ,series in sorted(result.series.items()):
+            fig.add_trace(go.Scatter(x=[p.date for p in series.points],
+                y=[float(p.value) for p in series.points],name=typ+" rate",
+                mode="lines",yaxis="y",legendgroup=typ))
+            volume=result.volume.get(typ)
+            if volume:
+                fig.add_trace(go.Bar(x=[p.date for p in volume.points],
+                    y=[float(p.value) for p in volume.points],
+                    name=typ+" volume",yaxis="y2",opacity=0.22,
+                    legendgroup=typ,visible="legendonly"))
+        fig.update_layout(yaxis_title="Reference rate (%)",
+            yaxis2=dict(title="Volume (USD billions)",overlaying="y",side="right",
+                        showgrid=False),barmode="group")
     else:
-        st.caption("Unlike operation logs, a primary-dealer keyid already represents one defined historical series. No automatic sum of multiple observations is performed.")
+        for label,series in sorted(result.series.items()):
+            default="legendonly" if label=="All operation types" else True
+            fig.add_trace(go.Scatter(x=[p.date for p in series.points],
+                y=[float(p.value) for p in series.points],mode="lines+markers",
+                name=label,visible=default))
+        fig.update_layout(yaxis_title=("Accepted par amount (USD)" if definition.mode in ("treasury","operations")
+                                      else "Accepted amount (USD)"))
+    fig.update_layout(title=definition.label,
+        xaxis_title="Effective date" if definition.mode=="rates" else "Operation date",
+        template="plotly_dark",height=460,hovermode="x unified",
+        legend_title_text="Click a legend entry to show/hide")
+    st.plotly_chart(fig,use_container_width=True,key="ny_chart_"+definition.id)
+
+
+def _load_nyfed():
+    st.markdown("#### New York Fed · research datasets")
+    st.caption("Search actual research datasets, including operation aggregation views and separately indexed primary-dealer statistical keyids. No endpoint-configuration forms.")
+    query=st.text_input("Find NY Fed data",
+        placeholder="repo, reverse repo, agency MBS, liquidity swaps, primary dealer, SOFR...",
+        key="nyfed_dataset_search")
+    with closing(get_connection()) as db:
+        report=catalog_status(db)
+        matches=[x for x in catalog_search(db,query,limit=250)
+                 if x["provider"] in ("NYFED_DATASET","NYFED_PD")]
+    st.caption(f"{report['counts'].get('NYFED_PD',0):,} primary-dealer time series indexed • "+
+               f"{report['counts'].get('NYFED_DATASET',0):,} structured data products")
+    if report["state"].get("ny_dealers_error"):
+        st.info(report["state"]["ny_dealers_error"])
+    if not matches:
+        st.info("No matching data product. Check spelling or wait for primary-dealer metadata to finish.")
+        return
+    choice=st.selectbox("Dataset to chart",matches,
+        format_func=lambda x:f'{x["label"]} · {x["provider"]} [{x["id"]}]'[:220],
+        key="nyfed_selected_dataset")
+    a,b=st.columns(2)
+    start=a.date_input("From",date.today()-timedelta(days=365),key="nyfed_range_start")
+    end=b.date_input("Through",date.today(),key="nyfed_range_end")
+    if st.button("Load NY Fed dataset",key="nyfed_fetch_dataset",type="primary"):
+        try:
+            if choice["provider"]=="NYFED_PD":
+                from financial_intelligence_agent.live.providers import dealer
+                result=dealer(choice["id"][len("NYFED_PD:"):],
+                    start.isoformat(),end.isoformat())
+                descriptor=Descriptor(choice["id"],choice["label"],"NYFED_PD",
+                      choice["unit"],choice["frequency"],choice["category"],
+                      choice["source_url"],choice["convention"])
+                series=replace(result.series,key=choice["id"])
+                _add(choice["id"],series,descriptor,result.retrieved_at,result.warning)
+                st.session_state["nyfed_loaded"]={"kind":"dealer","id":choice["id"]}
+            else:
+                result=_fetch_ny_dataset(choice["id"],start.isoformat(),end.isoformat())
+                for name,series in result.series.items():
+                    desc=Descriptor(series.key,choice["label"]+" · "+name,"NYFED",
+                        result.units[name],"daily",choice["category"],
+                        result.source_url,series.convention)
+                    _add(series.key,series,desc,result.retrieved_at,
+                         "; ".join(result.warnings))
+                for name,series in result.volume.items():
+                    desc=Descriptor(series.key,choice["label"]+" · "+name+" volume",
+                       "NYFED","Billions of USD","daily",choice["category"],
+                       result.source_url,series.convention)
+                    _add(series.key,series,desc,result.retrieved_at,
+                         "NY Fed published volume, billions of USD")
+                st.session_state["nyfed_loaded"]={"kind":"product","id":choice["id"],
+                                                   "result":result}
+            st.success("Publisher observations loaded and available in the Chart Designer below.")
+        except Exception as exc:
+            st.error("NY Fed request rejected: "+str(exc))
+            st.session_state.pop("nyfed_loaded",None)
+    loaded=st.session_state.get("nyfed_loaded")
+    if loaded is None:return
+    if loaded["kind"]=="dealer":
+        item=_state().get(loaded["id"])
+        if item is None:return
+        series=item["series"]
+        frame=pd.DataFrame([{"Date":p.date,"Value":float(p.value) for p in series.points])
+        st.line_chart(frame.set_index("Date"),y_label=series.unit)
+        st.dataframe(frame.tail(250),use_container_width=True,hide_index=True)
+        st.download_button("Download dealer series CSV",
+            frame.to_csv(index=False).encode("utf-8-sig"),"nyfed-dealer-series.csv",
+            mime="text/csv",key="nydealer_csv")
+        return
+    result=loaded["result"]
+    st.caption("Publisher source: "+result.source_url)
+    _show_ny_chart(result)
+    for note in result.warnings:st.caption(note)
+    st.subheader("Daily chart observations")
+    daily=pd.DataFrame(result.daily)
+    st.dataframe(daily,use_container_width=True,hide_index=True,height=260)
+    st.download_button("Download daily aggregates CSV",
+       daily.to_csv(index=False).encode("utf-8-sig"),"nyfed-daily.csv",
+       mime="text/csv",key="ny_daily_download")
+    st.subheader("Underlying publisher records (wide table)")
+    details=pd.DataFrame(result.detail)
+    st.dataframe(details,use_container_width=True,hide_index=True,height=360)
+    # Use the app's CSV safety helper: spreadsheet formula-looking input is
+    # escaped without altering the raw data displayed in the table.
+    from financial_intelligence_agent.live.charts import _safe_cell
+    export=details.copy()
+    for column in export.columns:
+        export[column]=export[column].map(lambda value:
+            _safe_cell(value) if isinstance(value,str) else value)
+    st.download_button("Download complete underlying records CSV",
+        export.to_csv(index=False).encode("utf-8-sig"),
+        "nyfed-record-level-data.csv",mime="text/csv",key="ny_detail_download")
 
 
 def _load_fdic():
@@ -218,136 +321,6 @@ def _load_breadth():
             for limitation in report["limitations"]:st.caption(limitation)
         except Exception as exc:st.error("Panel analysis unavailable: "+str(exc))
 
-def _load_nyfed_other():
-    st.markdown("#### New York Fed operations and other API families")
-    st.caption("Operations are transaction-level data. We aggregate compatible monetary amounts by day and operation type for charts, retaining the original row-level detail underneath.")
-    catalog_path=st.session_state.get("nyfed_endpoint_suggestion","rp/results/search.json")
-    examples={
-        "Repo / reverse repo operations":"rp/results/search.json",
-        "Selected indexed endpoint":catalog_path,
-        "Other documented endpoint":""
-    }
-    selected=st.selectbox("Published Markets API endpoint",list(examples),
-                          key="nyfed_api_template")
-    custom=st.text_input("Relative .json path on markets.newyorkfed.org/api/",
-                         value=examples[selected],key="nyfed_api_location")
-    one,two=st.columns(2)
-    start=one.date_input("From",date.today()-timedelta(days=30),key="nyfed_api_start")
-    end=two.date_input("Through",date.today(),key="nyfed_api_end")
-    use_dates=st.checkbox("Pass start/end date filters",value=True,key="nyfed_use_dates")
-    if st.button("Fetch published operation records",type="primary",key="nyfed_fetch_operations"):
-        try:
-            data=discover_nyfed(custom,start=start.isoformat() if use_dates else None,
-                                end=end.isoformat() if use_dates else None)
-            st.session_state["nyfed_explorer_payload"]=data
-            # A new API request invalidates previously aggregated chart data.
-            # Never show an old operation chart under newly fetched rows.
-            st.session_state.pop("nyfed_operation_view",None)
-            st.success("Publisher JSON loaded. "+str(len(data.candidate_paths))+" record arrays found.")
-        except Exception as exc:st.error("NY Fed request failed: "+str(exc))
-    data=st.session_state.get("nyfed_explorer_payload")
-    if data is None:return
-    st.caption("Retrieved "+data.fetched_at+" · Endpoint: "+data.endpoint)
-    if not data.candidate_paths:
-        st.warning("This endpoint has no recognized record array; inspect the publisher schema.")
-        return
-    records_path=st.selectbox("Publisher record array",data.candidate_paths,
-                              key="nyfed_record_array")
-    try:
-        rows=records_from_path(data,records_path)
-    except Exception as exc:
-        st.error("Cannot extract published records: "+str(exc));return
-    columns=sorted(set().union(*(set(row) for row in rows[:100]))) if rows else []
-    if not columns:
-        st.warning("No operation records in this date window.");return
-    st.caption(str(len(rows))+" source records; the table below is the original publisher detail.")
-    operation_ready=("operationDate" in columns and
-                     ("operationType" in columns or "type" in columns) and
-                     bool(metric_options(data,records_path)))
-    if operation_ready:
-        metrics=metric_options(data,records_path)
-        metric=st.selectbox("Additive amount to chart",metrics,
-                            index=metrics.index("totalAmtAccepted") if "totalAmtAccepted" in metrics else 0,
-                            key="nyfed_operations_metric")
-        choices=operation_types(data,records_path)
-        selected_type=st.selectbox("Operation type",["All types",*choices],
-                                  key="nyfed_operations_type")
-        if st.button("Aggregate per day and chart",type="primary",key="nyfed_daily_aggregate"):
-            try:
-                result=aggregate_operations(data,record_path=records_path,metric=metric,
-                    operation_type=None if selected_type=="All types" else selected_type)
-                st.session_state["nyfed_operation_view"]=result
-                for typ,series in result.series.items():
-                    k=series.key
-                    desc=Descriptor(k,f"{typ} · {metric} (daily aggregate)",
-                                    "NYFED",result.unit,"daily","NY Fed operations",
-                                    "https://markets.newyorkfed.org/api/"+data.endpoint,
-                                    "operation_date")
-                    _add(k,series,desc,data.fetched_at,
-                         "Daily monetary sum per operation type; original operation rows retained below.")
-            except Exception as exc:st.error("Aggregation rejected: "+str(exc))
-        report=st.session_state.get("nyfed_operation_view")
-        if report is not None and report.endpoint==data.endpoint:
-            st.subheader("Daily operation totals")
-            matrix=pd.DataFrame(report.daily)
-            if not matrix.empty:
-                display=matrix.pivot(index="observation_date",
-                                       columns="operation_type",values="total")
-                display=display.apply(pd.to_numeric,errors="coerce")
-                st.line_chart(display,y_label=report.unit)
-                st.dataframe(matrix,hide_index=True,use_container_width=True)
-                st.download_button("Download daily aggregates CSV",
-                                   matrix.to_csv(index=False).encode("utf-8"),
-                                   file_name="nyfed-daily-operation-totals.csv",mime="text/csv")
-            for note in report.field_notes:st.caption(note)
-    else:
-        st.info("This endpoint does not match the operation-level schema. Use the explicit field mapper below for other publisher datasets.")
-        date_col=st.selectbox("Observation date field",columns,
-                              index=columns.index("date") if "date" in columns else 0,
-                              key="nyfed_generic_date")
-        amount_col=st.selectbox("Numeric field",columns,
-                              index=columns.index("value") if "value" in columns else 0,
-                              key="nyfed_generic_value")
-        unit=st.text_input("Publisher unit (verify from documentation)",
-                           "source-native",key="nyfed_generic_unit")
-        frequency=st.selectbox("Frequency",["daily","weekly","monthly","quarterly","annual","irregular"],
-                               key="nyfed_generic_frequency")
-        aggregation=st.selectbox("Duplicate-day policy",["reject","sum","mean","last"],
-                                 key="nyfed_generic_aggregation")
-        if st.button("Map records to a series",key="nyfed_generic_map"):
-            try:
-                s=map_series(data,path=records_path,key="NYFED_MAPPED",
-                             date_field=date_col,value_field=amount_col,
-                             unit=unit,frequency=frequency,aggregation=aggregation)
-                _add("NYFED_MAPPED",s,_entry_desc("NYFED_MAPPED",s),
-                     data.fetched_at,"Verify schema, field definition and unit before use.")
-                st.success("Mapped "+str(len(s.points))+" date observations.")
-            except Exception as exc:st.error("Mapping rejected: "+str(exc))
-    active_view=st.session_state.get("nyfed_operation_view")
-    if (operation_ready and active_view is not None
-            and active_view.endpoint==data.endpoint):
-        # The detail table must correspond to the data actually aggregated
-        # into the displayed chart, including the selected operation type.
-        underlying=list(active_view.detail)
-        st.subheader("Operations underlying the current daily chart")
-        st.caption(f"{len(underlying)} matching source records, before daily aggregation")
-    else:
-        underlying=rows
-        st.subheader("Underlying publisher records")
-    details=pd.DataFrame(underlying)
-    st.dataframe(details,hide_index=True,use_container_width=True,height=350)
-    # Formula-escape all cells to avoid spreadsheet injection when exported.
-    import csv,io
-    out=io.StringIO()
-    writer=csv.writer(out)
-    writer.writerow([str(c) for c in details.columns])
-    for values in details.itertuples(index=False,name=None):
-        writer.writerow([("'"+str(v) if isinstance(v,str) and v.lstrip().startswith(("=","+","-","@"))
-                          else v) for v in values])
-    st.download_button("Download full publisher detail CSV",
-                       out.getvalue().encode("utf-8-sig"),
-                       file_name="nyfed-operation-detail.csv",mime="text/csv",
-                       key="nyfed_detail_export")
 
 
 def _load_upload():
@@ -554,14 +527,14 @@ def render():
     st.info("Live mode fetches upstream API data on demand. Publisher release dates and data vintages are not guaranteed. "
             "Never treat this as a real-time trading feed.")
     with st.expander("Data acquisition",expanded=not bool(_state())):
-        tab1,tab2,tab3,tab4,tab5,tab6,tab7=st.tabs(["FRED + NY Fed rates","Primary dealers","Other NY Fed APIs","FDIC bank financials","Bank contraction breadth","Databricks Gold","FFIEC / CSV upload"])
-        with tab1:_load_public_series()
-        with tab2:_load_dealers()
-        with tab3:_load_nyfed_other()
-        with tab4:_load_fdic()
-        with tab5:_load_breadth()
-        with tab6:_load_gold()
-        with tab7:_load_upload()
+        fred_tab,ny_tab,fdic_tab,breadth_tab,gold_tab,upload_tab=st.tabs(
+            ["FRED","NY Fed","FDIC bank financials","Bank contraction breadth","Databricks Gold","FFIEC / CSV upload"])
+        with fred_tab:_load_fred()
+        with ny_tab:_load_nyfed()
+        with fdic_tab:_load_fdic()
+        with breadth_tab:_load_breadth()
+        with gold_tab:_load_gold()
+        with upload_tab:_load_upload()
     ws=_state()
     if ws:
         st.subheader("Working data catalog")

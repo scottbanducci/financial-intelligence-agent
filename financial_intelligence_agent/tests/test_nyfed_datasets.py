@@ -19,6 +19,9 @@ class NYFedDatasets(unittest.TestCase):
         self.assertEqual(len(DATASETS),7)
         self.assertFalse(any("soma" in d.id.lower() or "seclending" in d.id.lower() for d in DATASETS))
         self.assertTrue(all(d.provider=="NYFED_DATASET" for d in dataset_descriptors()))
+    def test_ambs_source_max_date_window(self):
+        with self.assertRaisesRegex(ValueError,"supported window"):
+            request_url(BY_ID["NYFED_DATASET:AMBS"],"2020-01-01","2023-01-01")
     def test_repo_three_distinct_product_views(self):
         url=request_url(BY_ID["NYFED_DATASET:RP_REPO"],self.A,self.B)
         self.assertEqual(parse_qs(urlsplit(url).query)["operationTypes"],["Repo"])

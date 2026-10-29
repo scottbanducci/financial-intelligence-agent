@@ -73,8 +73,9 @@ def dataset_descriptors()->list[Descriptor]:
 
 def request_url(dataset:NYDataset,start:str,end:str)->str:
     a,b=validate_dates(start,end)
-    if (b-a).days>365*3:
-        raise ValueError("NY Fed request window limited to three years per operation query")
+    max_days=730 if dataset.mode=="operations" else 365*3
+    if (b-a).days>max_days:
+        raise ValueError("Requested NY Fed date range exceeds the supported window for this dataset")
     params={"startDate":a.isoformat(),"endDate":b.isoformat()}
     if dataset.operation_filter is not None:
         params["operationTypes"]=dataset.operation_filter

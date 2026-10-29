@@ -468,33 +468,77 @@ def _load_upload():
         except Exception as exc:st.error("Import rejected: "+str(exc))
 
 def _operators():
+    """Operator-first interface, with controls determined by the selected arity."""
     ws=_state()
-    if not ws:return
-    st.markdown("#### Build derived time series")
-    op=st.selectbox("Analytical operation",sorted(OPERATOR_SPECS),key="series_operation")
-    spec=OPERATOR_SPECS[op]
+    st.markdown("### Apply an operator")
+    st.caption("Choose an operation, then the dataset for each input. Results are saved for charting and reuse.")
+    if not ws:
+        st.info("No datasets loaded yet. Visit Live Data Studio and load a FRED, NY Fed, FDIC or uploaded series.")
+        return
+    operator=st.selectbox("1 · Operator",sorted(OPERATOR_SPECS),
+                          key="series_operation",
+                          format_func=lambda name:name.replace("_"," ").capitalize())
+    spec=OPERATOR_SPECS[operator]
     names=list(ws)
-    x,y,z=st.columns(3)
-    a=x.selectbox("First input",names,key="series_op_a")
-    b=y.selectbox("Second input",names,key="series_op_b") if spec.arity==2 else None
-    window=z.number_input("Observation window",min_value=2,max_value=500,value=20,key="series_op_window")
-    new=st.text_input("Output name",value="derived_"+op,key="derived_key")
-    if st.button("Compute and save in workspace"):
+    st.caption(f"{spec.group.replace('_',' ').title()} · {spec.arity} input"+
+               ("s" if spec.arity!=1 else "")+
+               (" · rolling window" if spec.windowed else ""))
+    cols=st.columns(spec.arity)
+    first=cols[0].selectbox("2 · First dataset",names,
+                            key="series_op_a",format_func=lambda key:
+                            f"{ws[key]['descriptor'].label} [{key}]")
+    second=cols[1].selectbox("3 · Second dataset",names,
+                             key="series_op_b",format_func=lambda key:
+                             f"{ws[key]['descriptor'].label} [{key}]") if spec.arity==2 else None
+    window=(st.number_input("Window (observations)",min_value=2,max_value=1000,
+              value=20,key="series_op_window") if spec.windowed else 5)
+    with st.expander("Output settings",expanded=False):
+        output_name=st.text_input("Save result as",value="derived_"+operator,
+                                  key="derived_key")
+        st.caption("Results remain in the current research session and can be used in later calculations.")
+    if st.button("Calculate and save result",type="primary",key="calculate_operator"):
         try:
-            src=[ws[a]["series"]]+([ws[b]["series"]] if b else [])
-            result=execute(op,*src,window=int(window))
-            safe=re.sub(r"[^A-Za-z0-9_.:-]","_",new)[:75]
-            if not safe or not safe[0].isalpha():raise ValueError("Name must begin with a letter")
+            inputs=[ws[first]["series"]]+([ws[second]["series"]] if second else [])
+            result=execute(operator,*inputs,window=int(window))
+            safe=re.sub(r"[^A-Za-z0-9_.:-]","_",output_name.strip())[:75]
+            if not safe or not safe[0].isalpha():
+                raise ValueError("Output name must begin with a letter")
             result=replace(result,key=safe)
             _add(safe,result,_entry_desc(safe,result),datetime.now(timezone.utc).isoformat(),
-                 "Derived from "+", ".join([a]+([b] if b else []))+
-                 "; historical release timestamps may be unknown.")
-            st.success("Derived series now available for charting")
-        except Exception as exc:st.error("Operator rejected: "+str(exc))
-    st.markdown("##### Explicitly normalize units and observation frequency")
+                 "Derived from "+", ".join([first]+([second] if second else []))+
+                 "; source publication times may not be independently verifiable.")
+            st.session_state["latest_transform_result"]=safe
+            st.success("Calculated and saved "+safe+" — available to all chart selections.")
+        except Exception as exc:
+            st.error("Operator rejected: "+str(exc))
+    latest=st.session_state.get("latest_transform_result")
+    if latest in ws:
+        series=ws[latest]["series"]
+        st.markdown("#### Most recent result")
+        try:
+            st.plotly_chart(preview_figure(series,latest),use_container_width=True,
+                            theme=None,key="transform_result_preview")
+            frame=pd.DataFrame([{"Date":p.date,"Value":float(p.value) if p.value is not None else None}
+                                 for p in series.select().points]).set_index("Date")
+            st.dataframe(frame.tail(60),use_container_width=True)
+            _source_publication({latest:series},title=latest,
+                                subtitle="Calculated series · "+series.frequency,
+                                prefix="transformed-result")
+        except Exception as exc:
+            st.warning("Result preview unavailable: "+str(exc))
+
+
+def _advanced_tools():
+    """Additional normalization, signals and multi-step plans under one expander."""
+    ws=_state()
+    if not ws:return
+    names=list(ws)
+    st.markdown("##### Unit and frequency normalization")
     u1,u2,u3=st.columns(3)
-    chosen=u1.selectbox("Transform series",names,key="normalize_series")
-    kind=u2.selectbox("Transformation",["Unit conversion","Resample to slower frequency","Align observation-date convention"],key="normalize_method")
+    chosen=u1.selectbox("Dataset to transform",names,key="normalize_series")
+    kind=u2.selectbox("Transformation",
+        ["Unit conversion","Resample to slower frequency",
+         "Align observation-date convention"],key="normalize_method")
     incoming=ws[chosen]["series"]
     if kind=="Unit conversion":
         valid=[name for name,(dimension,_) in UNITS.items()
@@ -504,47 +548,81 @@ def _operators():
         targets=[freq for freq,order in ORDER.items()
                  if incoming.frequency in ORDER and order>ORDER[incoming.frequency]]
         destination=u3.selectbox("Target frequency",targets,key="normalize_freq") if targets else None
-        aggregator=st.selectbox("Aggregation / stock-vs-flow choice",AGGREGATIONS,key="normalize_aggregate")
+        aggregator=st.selectbox("Stock vs flow aggregation",AGGREGATIONS,key="normalize_aggregate")
     else:destination="observation_date"
     if st.button("Apply normalization",key="apply_normalization"):
         try:
-            if not destination:raise ValueError("No valid conversion for this input")
+            if not destination:raise ValueError("No valid conversion for this dataset")
             if kind=="Unit conversion":out=convert_units(incoming,destination)
             elif kind=="Resample to slower frequency":out=resample(incoming,destination,aggregator)
             else:out=align_date_convention(incoming)
             new_key=("norm_"+chosen).replace(":","_")[:85]
             out=replace(out,key=new_key)
             _add(new_key,out,_entry_desc(new_key,out),datetime.now(timezone.utc).isoformat(),
-                 "Explicit conversion requested by analyst. Verify period and vintage alignment.")
-            st.success("Normalized data added: "+new_key)
+                 "Analyst requested explicit conversion; confirm vintage and aggregation semantics.")
+            st.success("Normalized series saved: "+new_key)
         except Exception as exc:st.error("Normalization rejected: "+str(exc))
     st.markdown("##### Research signal check")
-    st.caption("One-shot threshold evaluation with provenance; continuous monitoring requires a deployed scheduled service.")
+    st.caption("On-demand evaluation; scheduled notifications are not deployed.")
     rule_cols=st.columns(3)
-    signal_name=rule_cols[0].selectbox("Measure to check",names,key="signal_series")
+    signal=rule_cols[0].selectbox("Dataset",names,key="signal_series")
     comparator=rule_cols[1].selectbox("Condition",sorted(COMPARES),key="signal_condition")
     threshold=rule_cols[2].number_input("Threshold (source unit)",value=0.0,key="signal_level")
-    signal_horizon=st.number_input("Comparison lookback (non-null observations)",
-                                    min_value=1,max_value=365,value=1,key="signal_horizon")
+    horizon=st.number_input("Comparison lookback (non-null observations)",
+              min_value=1,max_value=365,value=1,key="signal_horizon")
     if st.button("Evaluate signal",key="evaluate_signal"):
         try:
-            rule=Rule("User-defined signal",ws[signal_name]["series"].key,
-                      comparator,threshold,int(signal_horizon))
-            output=evaluate(rule,ws[signal_name]["series"])
-            st.json(output)
-            st.download_button("Export evaluated signal JSON",json.dumps(output,indent=2),
-                  file_name="liquidity-signal-evaluation.json",mime="application/json")
+            rule=Rule("User-defined signal",ws[signal]["series"].key,
+                      comparator,threshold,int(horizon))
+            result=evaluate(rule,ws[signal]["series"])
+            st.json(result)
+            st.download_button("Export evaluated signal JSON",json.dumps(result,indent=2),
+                file_name="liquidity-signal-evaluation.json",mime="application/json",
+                key="signal_json_download")
         except Exception as exc:st.error("Signal rejected: "+str(exc))
-    with st.expander("Direct JSON multi-step operator plan"):
-        default={"steps":[{"id":"change","operator":"first_difference","inputs":[names[0]]}],
-                 "result_id":"change"}
-        source=st.text_area("Plan",value=json.dumps(default,indent=2),height=150,key="studio_jsonplan")
-        if st.button("Compute plan"):
-            try:
-                svc=AnalyticalService({k:entry["series"] for k,entry in ws.items()})
-                output=svc.run(json.loads(source))
-                st.json(output)
-            except Exception as exc:st.error(str(exc))
+    st.markdown("##### Multi-step operator plan")
+    example={"steps":[{"id":"change","operator":"first_difference",
+                       "inputs":[names[0]]}],"result_id":"change"}
+    payload=st.text_area("Plan JSON",value=json.dumps(example,indent=2),
+                         height=150,key="studio_jsonplan")
+    if st.button("Compute validated plan",key="compute_multistep_plan"):
+        try:
+            service=AnalyticalService({k:v["series"] for k,v in ws.items()})
+            st.json(service.run(json.loads(payload)))
+        except Exception as exc:st.error("Plan rejected: "+str(exc))
+
+
+def _workspace_management():
+    ws=_state()
+    st.markdown("##### Working datasets")
+    summary=[{"Series ID":key,"Provider":entry["descriptor"].provider,
+              "Unit":entry["series"].unit,"Frequency":entry["series"].frequency,
+              "Observations":len(entry["series"].points),
+              "Latest":max(p.date for p in entry["series"].points).isoformat()}
+             for key,entry in ws.items()]
+    if summary:
+        st.dataframe(pd.DataFrame(summary),hide_index=True,use_container_width=True)
+    st.caption("Portable research workspaces include data and provenance, not API credentials.")
+    try:
+        st.download_button("Download workspace JSON",export_workspace(ws),
+            file_name="liquidity-research-workspace.json",mime="application/json",
+            key="save_research_workspace")
+    except Exception as exc:st.warning("Cannot export workspace: "+str(exc))
+    uploaded=st.file_uploader("Restore saved workspace JSON",type=["json"],
+                              key="restore_research_workspace")
+    if uploaded is not None and st.button("Restore verified workspace",key="restore_confirm"):
+        try:
+            recovered=import_workspace(uploaded.getvalue())
+            st.session_state["analyst_workspace"]=recovered
+            st.session_state.pop("latest_transform_result",None)
+            st.rerun()
+        except Exception as exc:st.error("Restore rejected: "+str(exc))
+    if ws:
+        remove=st.multiselect("Remove datasets",list(ws),key="remove_series")
+        if st.button("Remove selected datasets",key="remove_selected"):
+            for key in remove:ws.pop(key,None)
+            st.rerun()
+
 
 def _chart_builder():
     ws=_state()
@@ -593,75 +671,40 @@ def _chart_builder():
                        " · latest "+entry["series"].select().points[-1].date.isoformat()+
                        " · "+entry["warning"])
         st.dataframe(frame.tail(40),use_container_width=True)
-        st.markdown("#### Export publication assets")
-        a,b,c,d=st.columns(4)
-        a.download_button("Download CSV",csv_bytes(frame),file_name="liquidity-chart-data.csv",
-                          mime="text/csv",key="export_chart_csv")
-        b.download_button("Download PNG",image_bytes(frame,spec,unit,"png"),
-                          file_name="liquidity-chart.png",mime="image/png",key="export_chart_png")
-        c.download_button("Download SVG",image_bytes(frame,spec,unit,"svg"),
-                          file_name="liquidity-chart.svg",mime="image/svg+xml",key="export_chart_svg")
-        d.download_button("Chart provenance JSON",metadata_bytes(chosen,spec,unit,warnings),
-                          file_name="liquidity-chart-provenance.json",mime="application/json",
-                          key="export_chart_meta")
-        p,q=st.columns(2)
-        p.download_button("Download full research bundle (.zip)",
-                          research_bundle_bytes(frame,spec,unit,chosen,warnings),
-                          file_name="liquidity-research-bundle.zip",
-                          mime="application/zip",key="export_chart_bundle")
-        q.download_button("Save reusable chart recipe (.json)",
-                          chart_recipe_bytes(chosen,spec),
-                          file_name="liquidity-chart-recipe.json",
-                          mime="application/json",key="export_chart_recipe")
-        st.caption("PNG and SVG include chart title, unit-aware y-axis, observation-date x-axis, legend, source attribution and caveats.")
+        _publication_buttons(frame,spec,unit,chosen,warnings,prefix="custom-chart")
     except Exception as exc:
         st.error("Chart validation: "+str(exc))
 
 def render():
-    st.caption("LIVE DATA / EXPLORATION / CHART EXPORT")
-    st.title("Financial Data Studio")
-    st.write("Retrieve current publisher series, apply deterministic analytics, "
-             "build charts, and export research-ready data and graphics.")
-    st.info("Live mode fetches upstream API data on demand. Publisher release dates and data vintages are not guaranteed. "
-            "Never treat this as a real-time trading feed.")
-    with st.expander("Data acquisition",expanded=not bool(_state())):
-        fred_tab,ny_tab,fdic_tab,breadth_tab,gold_tab,upload_tab=st.tabs(
-            ["FRED","NY Fed","FDIC bank financials","Bank contraction breadth","Databricks Gold","FFIEC / CSV upload"])
-        with fred_tab:_load_fred()
-        with ny_tab:_load_nyfed()
-        with fdic_tab:_load_fdic()
-        with breadth_tab:_load_breadth()
-        with gold_tab:_load_gold()
-        with upload_tab:_load_upload()
-    ws=_state()
-    if ws:
-        st.subheader("Working data catalog")
-        summary=[{"Series ID":k,"Provider":v["descriptor"].provider,
-                  "Unit":v["series"].unit,"Frequency":v["series"].frequency,
-                  "Observations":len(v["series"].points),
-                  "Latest observation":max(p.date for p in v["series"].points).isoformat(),
-                  "Retrieved":v["retrieved"][:19]} for k,v in ws.items()]
-        st.dataframe(pd.DataFrame(summary),hide_index=True,use_container_width=True)
-        with st.expander("Manage datasets and transformations"):
-            st.markdown("##### Portable research workspace")
-            st.caption("Save an auditable portable copy of your data and source metadata. No API credentials are stored.")
-            try:
-                st.download_button("Download workspace JSON",export_workspace(ws),
-                                   file_name="liquidity-research-workspace.json",
-                                   mime="application/json",key="save_research_workspace")
-            except Exception as exc:st.warning("Cannot export workspace: "+str(exc))
-            uploaded=st.file_uploader("Restore a previously exported workspace",type=["json"],
-                                      key="restore_research_workspace")
-            if uploaded is not None and st.button("Restore verified workspace",key="restore_confirm"):
-                try:
-                    recovered=import_workspace(uploaded.getvalue())
-                    if len(recovered)>80:raise ValueError("Workspace series limit exceeded")
-                    st.session_state["analyst_workspace"]=recovered
-                    st.rerun()
-                except Exception as exc:st.error("Restore rejected: "+str(exc))
-            remove=st.multiselect("Remove series from this session",list(ws),key="remove_series")
-            if st.button("Remove selected"):
-                for key in remove:ws.pop(key,None)
-                st.rerun()
-            _operators()
+    """Live sources, their charts, previews and exports only."""
+    st.caption("LIVE DATA / SOURCE EXPLORATION")
+    st.title("Live Data Studio")
+    st.write("Discover and retrieve publisher data. Preview the results and export research-ready source charts.")
+    st.caption("Live requests are on demand; observation dates and revisions are not a real-time market feed.")
+    fred_tab,ny_tab,fdic_tab,breadth_tab,gold_tab,upload_tab=st.tabs(
+        ["FRED","NY Fed","FDIC bank financials","Bank contraction breadth",
+         "Databricks Gold","FFIEC / CSV upload"])
+    with fred_tab:_load_fred()
+    with ny_tab:_load_nyfed()
+    with fdic_tab:_load_fdic()
+    with breadth_tab:_load_breadth()
+    with gold_tab:_load_gold()
+    with upload_tab:_load_upload()
+    count=len(_state())
+    if count:
+        st.caption(f"{count} datasets ready for analysis. Select **Data transformations** in the sidebar to apply operators, build comparison charts and manage the workspace.")
+
+
+def render_transformations():
+    """Single operator-first workspace shared with Live Data Studio."""
+    st.caption("ANALYSIS / TRANSFORMATIONS / CHART DESIGN")
+    st.title("Data transformations")
+    st.write("Choose an operator, select the input datasets, and calculate. "+
+             "Build comparison charts or export the result without leaving this workspace.")
+    _operators()
+    st.divider()
     _chart_builder()
+    with st.expander("Advanced transformations and research signals",expanded=False):
+        _advanced_tools()
+    with st.expander("Manage working datasets and saved workspaces",expanded=False):
+        _workspace_management()

@@ -287,6 +287,10 @@ def bootstrap(path:str|Path=DB_DEFAULT,*,enable_network:bool=True)->dict:
             if (states.get("fred_complete")=="true"
                     and states.get("fred_releases_loaded")!="true"):
                 db.execute("DELETE FROM crawl_state WHERE name='fred_complete'")
+                # An old category completion flag can coexist with partially
+                # populated release rows. Restart release pagination safely,
+                # retaining the deduplicated metadata already discovered.
+                db.execute("UPDATE fred_releases SET status='pending',next_offset=0,expected_count=-1")
                 states.pop("fred_complete",None)
             db.commit()
             if states.get("fred_complete")=="true" and states.get("fred_updated"):

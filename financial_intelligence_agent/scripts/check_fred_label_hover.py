@@ -58,15 +58,33 @@ def main():
                 page=browser.new_page(viewport={"width":1240,"height":900})
                 page.goto(f"http://127.0.0.1:{PORT}",wait_until="domcontentloaded")
                 page.get_by_role("tab",name="FRED",exact=True).click(timeout=30000)
-                page.get_by_placeholder("e.g. H.8, commercial bank credit, SOFR").fill("LONG_SERIES")
+                search=page.get_by_placeholder("e.g. H.8, commercial bank credit, SOFR")
+                search.fill("LONG_SERIES")
+                # Streamlit commits text_input only on Enter/blur. Wait for
+                # that rerun to complete BEFORE opening the transient dropdown.
+                search.press("Enter")
                 series=page.locator('[data-testid="stSelectbox"]').filter(
                     has=page.get_by_text("Series",exact=True))
+                series.locator("input").wait_for(timeout=20000)
+                page.wait_for_function("""() => Array.from(document.querySelectorAll(
+                    '[data-testid="stSelectbox"]')).some(el =>
+                    el.textContent.includes("Series") &&
+                    (el.querySelector("input")?.value || "").includes("REALLYLONG"))""",
+                    timeout=20000)
                 series.locator("input").click()
                 option=page.locator('[role="listbox"][aria-label="Series"] [role="option"]').filter(
                     has_text="REALLYLONG").first
                 option.wait_for(timeout=15000)
                 label=option.locator("[data-item-hl]")
-                option.hover()
+                try:
+                    option.hover(timeout=6500)
+                except Exception:
+                    print("DEBUG options:",
+                          page.locator('[role="listbox"] [role="option"]').all_text_contents()[:5])
+                    print("DEBUG series inputs:",
+                          page.locator('[data-testid="stSelectbox"] input').evaluate_all(
+                          "(els) => els.map(el => el.value)"))
+                    raise
                 initial=label.evaluate("el => ({width:el.clientWidth, scroll:el.scrollWidth})")
                 assert initial["scroll"]>initial["width"]+20,initial
                 page.wait_for_timeout(2500)

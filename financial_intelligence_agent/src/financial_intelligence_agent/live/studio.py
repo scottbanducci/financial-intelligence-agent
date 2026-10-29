@@ -15,6 +15,7 @@ import pandas as pd
 import streamlit as st
 
 from financial_intelligence_agent.live.catalog_index import get_connection,search as catalog_search,status as catalog_status,release_list
+from financial_intelligence_agent.live.long_labels import install_fred_label_scrolling,render_fred_metadata
 from financial_intelligence_agent.live.nyfed_datasets import fetch_dataset,BY_ID
 from financial_intelligence_agent.live.panels import fetch_bank_panel,contraction_breadth
 from financial_intelligence_agent.live.databricks_gold import read_gold,descriptors as gold_descriptors
@@ -99,6 +100,7 @@ def _source_publication(sources:dict[str,Series],*,title:str,subtitle:str,
 
 
 def _load_fred():
+    install_fred_label_scrolling()
     st.markdown("#### FRED · release and series discovery")
     st.caption("All FRED releases and every release's paginated series are indexed in a background worker. Search runs locally; a fresh index may be incomplete until crawling finishes.")
     with closing(get_connection()) as db:
@@ -138,8 +140,7 @@ def _load_fred():
             key="fred_series_item")
     if len(matches)==150:st.caption("Showing the first 150 matches. Refine your search to narrow the results.")
     with st.expander("Metadata for indexed series"):
-        st.dataframe(pd.DataFrame(matches[:75])[["id","label","frequency","unit"]],
-                     use_container_width=True,hide_index=True)
+        render_fred_metadata(matches[:75])
     a,b=st.columns(2)
     start=a.date_input("From",date.today()-timedelta(days=365*4),key="fred_range_start")
     end=b.date_input("Through",date.today(),key="fred_range_end")

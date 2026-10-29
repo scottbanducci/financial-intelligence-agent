@@ -1,0 +1,55 @@
+name: Live NY Fed schema validation
+on:
+  push:
+    branches: [experiment/market-liquidity-launch]
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch and inspect real published JSON envelopes
+        run: |
+          python - <<'PY'
+          import json,urllib.request,urllib.error,datetime
+          from urllib.parse import urlencode
+          end=datetime.date.today()
+          start=end-datetime.timedelta(days=160)
+          endpoints={
+            "Agency MBS":"ambs/all/results/summary/search.json",
+            "Central bank swaps":"fxs/all/search.json",
+            "Reference rates":"rates/all/search.json",
+            "Repo operations":"rp/results/search.json",
+            "Treasury operations":"tsy/all/results/summary/search.json",
+          }
+          def arrays(payload,prefix="",depth=0):
+              if depth>5:return []
+              if isinstance(payload,list) and payload and isinstance(payload[0],dict):
+                  return [{"path":prefix,"count":len(payload),
+                           "fields":list(payload[0])[:45]}]
+              if isinstance(payload,dict):
+                  out=[]
+                  for k,v in payload.items():
+                      out+=arrays(v,prefix+"."+k if prefix else k,depth+1)
+                  return out
+              return []
+          for label,endpoint in endpoints.items():
+              url="https://markets.newyorkfed.org/api/"+endpoint+"?"+urlencode({
+                  "startDate":str(start),"endDate":str(end)})
+              try:
+                  req=urllib.request.Request(url,headers={"User-Agent":"Liquidity-Intelligence-CI/1.0"})
+                  with urllib.request.urlopen(req,timeout=16) as result:
+                      raw=result.read(5_000_001)
+                  if len(raw)>5_000_000:raise ValueError("Large payload; narrow date range")
+                  doc=json.loads(raw)
+                  print("SCHEMA",json.dumps({"dataset":label,"ok":True,
+                        "envelope":list(doc)[:20] if isinstance(doc,dict) else type(doc).__name__,
+                        "arrays":arrays(doc)[:8]}),flush=True)
+              except Exception as exc:
+                  print("SCHEMA",json.dumps({"dataset":label,"ok":False,
+                        "exception":type(exc).__name__,"message":str(exc)[:180]}),flush=True)
+          PY

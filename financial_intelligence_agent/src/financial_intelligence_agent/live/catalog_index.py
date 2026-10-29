@@ -80,7 +80,11 @@ def seed(db:sqlite3.Connection)->None:
     # Migrate the pre-existing endpoint-driven index in place.
     db.execute("DELETE FROM entries WHERE provider IN ('NY_ENDPOINT','NYFED')")
     for d in seed_catalog():
-        if d.provider=="FRED":put_entry(db,d)
+        # Curated fallback rows should never overwrite fresher metadata
+        # previously fetched from the official release/series endpoint.
+        if d.provider=="FRED" and db.execute(
+            "SELECT 1 FROM entries WHERE id=?",(d.id,)).fetchone() is None:
+            put_entry(db,d)
     for d in dataset_descriptors():
         put_entry(db,d,kind="dataset",endpoint=d.source_url)
     db.commit()

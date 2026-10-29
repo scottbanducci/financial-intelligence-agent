@@ -14,6 +14,11 @@ class CatalogIndexTests(unittest.TestCase):
         self.db=get_connection(Path(self.temp.name)/"index.sqlite")
         seed(self.db)
     def tearDown(self):self.db.close();self.temp.cleanup()
+    def test_seed_cannot_overwrite_publisher_metadata(self):
+        self.db.execute("UPDATE entries SET label='Published newer SOFR metadata' WHERE id='FRED:SOFR'")
+        self.db.commit()
+        seed(self.db)
+        self.assertEqual(lookup(self.db,"FRED:SOFR")["label"],"Published newer SOFR metadata")
     def test_provider_split_and_local_search(self):
         self.assertGreaterEqual(len(search(self.db,"repo",provider="NYFED_DATASET")),3)
         self.assertGreaterEqual(len(search(self.db,"bank",provider="FRED")),1)

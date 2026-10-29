@@ -60,3 +60,8 @@ jobs:
         env:
           PYTHONPATH: src
         run: python scripts/probe_public_apis.py
+      - name: Advisory live NY Fed product mapping probes
+        continue-on-error: true
+        env:
+          PYTHONPATH: src
+        run: python scripts/probe_research_datasets.py

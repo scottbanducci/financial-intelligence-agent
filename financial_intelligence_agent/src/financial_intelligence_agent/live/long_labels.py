@@ -60,7 +60,7 @@ _SCROLL_STYLE = r"""
 .fred-label-viewport::-webkit-scrollbar { display: none; }
 .fred-label-text { display: inline-block; width: max-content; min-width: 100%; }
 @keyframes fred-label-pan {
-    0%, 12% { transform: translateX(0); }
+    0%, 4% { transform: translateX(0); }
     86%, 100% {
         /* Container query units account for each cell's actual width;
            transform percentages refer to the full text width. */

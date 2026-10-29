@@ -98,10 +98,13 @@ def main():
                 viewport.hover()
                 meta_initial=viewport.evaluate("el => ({width:el.clientWidth, scroll:el.scrollWidth})")
                 assert meta_initial["scroll"]>meta_initial["width"]+20,meta_initial
-                page.wait_for_timeout(2500)
-                meta_distance=viewport.evaluate("el => el.scrollLeft")
-                assert meta_distance>15,f"Metadata label did not scroll on hover: {meta_distance}"
-                print("PASS: metadata label scrolls horizontally on hover",meta_distance)
+                text_span=viewport.locator(".fred-label-text")
+                initial_x=text_span.evaluate("el => el.getBoundingClientRect().left")
+                page.wait_for_timeout(3500)
+                moved_x=text_span.evaluate("el => el.getBoundingClientRect().left")
+                travel=initial_x-moved_x
+                assert travel>15,f"Metadata CSS text did not pan on hover: {travel}"
+                print("PASS: metadata label pans horizontally on hover",travel)
             finally:browser.close()
     finally:
         server.terminate()

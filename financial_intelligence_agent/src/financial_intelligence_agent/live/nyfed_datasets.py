@@ -279,6 +279,8 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
                 value=dec(amount)
                 unit=group
             grouped[group][observed]+=value
+        if not grouped:
+            raise ValueError("Missing usable numeric operation amounts; no daily chart can be produced")
         if excluded_missing:
             warnings.append(f"{excluded_missing} operation records lack accepted amounts and were excluded from sums; original rows remain in the detail table.")
         if d.mode=="repo" and d.operation_filter is not None and have_breakdown:

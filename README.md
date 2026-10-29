@@ -32,6 +32,22 @@ Plotly legends toggle individual traces.
 **Other tabs:** FDIC bank-level financials, bank contraction breadth,
 read-only Databricks Gold, and manually uploaded FFIEC/CSV files.
 
+## Workspaces: discover first, transform second
+
+**Live Data Studio** is now a focused source browser: FRED, NY Fed, FDIC,
+Databricks Gold and FFIEC/CSV retrieval; an automatically scaled Y axis for
+FRED (and primary-dealer) line previews; source observation tables; and
+publication-ready CSV, PNG, SVG, provenance JSON, ZIP and recipe exports.
+
+**Data transformations** is a separate sidebar workspace sharing the same
+session datasets. Select an operator first, then one or two operand datasets;
+only rolling operators request a window. The result is saved as another
+dataset and shown with an immediate chart, table and publication downloads.
+The multi-series Chart Designer lives here, with dataset selection first,
+normalization/alerts/JSON plans under Advanced, and portable workspace
+management beneath the main chart designer. The original Operator Lab
+remains a historical-fixture educational demonstration.
+
 The analytical library includes 48 deterministic operators, 24 ML
 algorithm registrations, LLM-bounded analytical planning, chart PNG/SVG,
 CSV and research-bundle exports.

@@ -11,6 +11,27 @@ class CatalogUIContract(unittest.TestCase):
         self.assertIn("fred_release_selected",text)
         self.assertIn("nyfed_dataset_search",text)
         self.assertIn("Download complete underlying records CSV",text)
+    def test_live_source_page_stays_focused_on_discovery(self):
+        studio=(ROOT/"src/financial_intelligence_agent/live/studio.py").read_text()
+        live=studio.split("def render():",1)[1].split("def render_transformations():",1)[0]
+        self.assertIn("_load_fred()",live)
+        self.assertIn("_load_nyfed()",live)
+        self.assertNotIn("_chart_builder()",live)
+        self.assertNotIn("Working data catalog",live)
+        self.assertNotIn("_operators()",live)
+        self.assertIn("preview_figure(series,label)",studio)
+        self.assertIn("_source_publication({recent:series}",studio)
+    def test_operator_first_page_contains_chart_and_exports(self):
+        studio=(ROOT/"src/financial_intelligence_agent/live/studio.py").read_text()
+        page=studio.split("def render_transformations():",1)[1]
+        self.assertIn("_operators()",page)
+        self.assertIn("_chart_builder()",page)
+        self.assertLess(page.index("_operators()"),page.index("_chart_builder()"))
+        self.assertIn("_workspace_management()",page)
+        self.assertIn("_publication_buttons(frame,spec,unit,chosen,warnings",studio)
+        app=(ROOT/"app.py").read_text()
+        self.assertIn('"Data transformations"',app)
+        self.assertIn('render_transformations()',app)
     def test_local_secrets_not_committed(self):
         ignore=(ROOT/".gitignore").read_text()
         self.assertIn(".env",ignore)

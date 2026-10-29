@@ -32,6 +32,12 @@ class CatalogUIContract(unittest.TestCase):
         app=(ROOT/"app.py").read_text()
         self.assertIn('"Data transformations"',app)
         self.assertIn('render_transformations()',app)
+    def test_fred_discontinued_toggle_and_quiet_preview(self):
+        studio=(ROOT/"src/financial_intelligence_agent/live/studio.py").read_text()
+        self.assertIn('fred_include_discontinued',studio)
+        self.assertIn('include_discontinued=include_discontinued',studio)
+        self.assertNotIn("Y-axis automatically follows the observed range rather than starting at zero.",studio)
+
     def test_local_secrets_not_committed(self):
         ignore=(ROOT/".gitignore").read_text()
         self.assertIn(".env",ignore)

@@ -217,7 +217,8 @@ def crawl_fred(db:sqlite3.Connection,api_key:str, *,
 
 
 def search(db:sqlite3.Connection,term:str,*,provider:str|None=None,
-           release_id:int|None=None,limit:int=150)->list[dict]:
+           release_id:int|None=None,limit:int=150,
+           include_discontinued:bool=True)->list[dict]:
     """Local provider-scoped, release-aware search of named datasets."""
     if not isinstance(term,str) or len(term)>140:raise ValueError("Search exceeds 140 characters")
     if provider is not None and provider not in {"FRED","NYFED_DATASET","NYFED_PD"}:
@@ -232,6 +233,10 @@ def search(db:sqlite3.Connection,term:str,*,provider:str|None=None,
     args=[]
     if provider is not None:
         sql+=" AND e.provider=?";args.append(provider)
+    # Filter in SQL, before LIMIT. Filtering the returned 150 records would
+    # otherwise hide active series when discontinued matches dominate.
+    if provider=="FRED" and not include_discontinued:
+        sql+=" AND instr(lower(e.label),'(discontinued)')=0"
     if release_id is not None:
         sql+=" AND m.release_id=?";args.append(release_id)
     for word in words:

@@ -120,15 +120,22 @@ def _load_fred():
         key="fred_release_selected")
     query=st.text_input("Search FRED series by name, identifier or release",
         placeholder="e.g. H.8, commercial bank credit, SOFR",key="fred_series_search")
+    series_col,toggle_col=st.columns([4,2],vertical_alignment="bottom")
+    with toggle_col:
+        include_discontinued=st.toggle("Include discontinued series",value=False,
+                                       key="fred_include_discontinued")
     with closing(get_connection()) as db:
         matches=catalog_search(db,query,provider="FRED",
-            release_id=selected_release["id"] if selected_release is not None else None,limit=150)
+            release_id=selected_release["id"] if selected_release is not None else None,
+            limit=150,include_discontinued=include_discontinued)
     if not matches:
-        st.info("No indexed series match. The release may still be indexing, or the search is too specific.")
+        st.info("No matching series in the indexed catalog. Try enabling discontinued series, "
+                "refining your search, or allowing the release crawl to finish.")
         return
-    chosen=st.selectbox("Series",matches,
-        format_func=lambda item:f'{item["label"]} · {item["id"][5:]} ({item["frequency"]}, {item["unit"]})',
-        key="fred_series_item")
+    with series_col:
+        chosen=st.selectbox("Series",matches,
+            format_func=lambda item:f'{item["label"]} · {item["id"][5:]} ({item["frequency"]}, {item["unit"]})',
+            key="fred_series_item")
     if len(matches)==150:st.caption("Showing the first 150 matches. Refine your search to narrow the results.")
     with st.expander("Metadata for indexed series"):
         st.dataframe(pd.DataFrame(matches[:75])[["id","label","frequency","unit"]],
@@ -160,7 +167,6 @@ def _load_fred():
         st.plotly_chart(fig,use_container_width=True,theme=None,
             key="fred_preview",config={"toImageButtonOptions":{
                 "format":"png","filename":"fred-series","height":900,"width":1500,"scale":2}})
-        st.caption("Y-axis automatically follows the observed range rather than starting at zero.")
         st.dataframe(frame.tail(200),use_container_width=True)
         _source_publication({recent:series},title=label,
                             subtitle="FRED published observations · "+series.frequency,

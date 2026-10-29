@@ -19,6 +19,36 @@ class CatalogIndexTests(unittest.TestCase):
         self.db.commit()
         seed(self.db)
         self.assertEqual(lookup(self.db,"FRED:SOFR")["label"],"Published newer SOFR metadata")
+    def test_discontinued_fred_toggle_filters_before_result_limit(self):
+        from financial_intelligence_agent.live.catalog_index import put_entry
+        # Deliberately sort discontinued matches ahead of active matches;
+        # filtering only after LIMIT would incorrectly return no results.
+        for code,label in (
+            ("OLD1","AAA Market liquidity (DISCONTINUED)"),
+            ("OLD2","AAB Market liquidity (Discontinued)"),
+            ("LIVE1","ZZZ Market liquidity"),
+        ):
+            put_entry(self.db,Descriptor("FRED:"+code,label,"FRED","percent","daily",
+                          "Test release","https://fred.stlouisfed.org/series/"+code,
+                          "FRED_realtime_vintage"))
+        self.db.execute("INSERT INTO fred_releases(release_id,name) VALUES (900,'Liquidity test')")
+        for code in ("OLD1","OLD2","LIVE1"):
+            self.db.execute("INSERT INTO fred_release_members(release_id,series_id) VALUES (?,?)",
+                            (900,"FRED:"+code))
+        self.db.commit()
+        only_active=search(self.db,"market liquidity",provider="FRED",
+                           release_id=900,limit=1,include_discontinued=False)
+        self.assertEqual([row["id"] for row in only_active],["FRED:LIVE1"])
+        included=search(self.db,"market liquidity",provider="FRED",
+                        release_id=900,include_discontinued=True)
+        self.assertEqual({row["id"] for row in included},
+                         {"FRED:OLD1","FRED:OLD2","FRED:LIVE1"})
+        self.assertEqual(len(search(self.db,"market liquidity",provider="FRED",
+                                    release_id=900,include_discontinued=False)),1)
+        # Non-FRED publishers are not accidentally subject to this filter.
+        self.assertTrue(search(self.db,"repo",provider="NYFED_DATASET",
+                               include_discontinued=False))
+
     def test_provider_split_and_local_search(self):
         self.assertGreaterEqual(len(search(self.db,"repo",provider="NYFED_DATASET")),3)
         self.assertGreaterEqual(len(search(self.db,"bank",provider="FRED")),1)

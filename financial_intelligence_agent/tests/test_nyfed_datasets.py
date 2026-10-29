@@ -22,6 +22,8 @@ class NYFedDatasets(unittest.TestCase):
     def test_repo_three_distinct_product_views(self):
         url=request_url(BY_ID["NYFED_DATASET:RP_REPO"],self.A,self.B)
         self.assertEqual(parse_qs(urlsplit(url).query)["operationTypes"],["Repo"])
+        rrp=request_url(BY_ID["NYFED_DATASET:RP_RRP"],self.A,self.B)
+        self.assertIn("operationTypes=Reverse%20Repo",rrp)
         data={"repo":{"operations":[
             {"operationDate":self.A,"operationType":"Repo","totalAmtAccepted":"100","securityType":"tsy"},
             {"operationDate":self.A,"operationType":"Repo","totalAmtAccepted":"25","securityType":"mbs"},

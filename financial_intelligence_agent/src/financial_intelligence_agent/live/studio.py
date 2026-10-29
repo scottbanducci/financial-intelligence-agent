@@ -169,8 +169,10 @@ def _load_nyfed():
         key="nyfed_dataset_search")
     with closing(get_connection()) as db:
         report=catalog_status(db)
-        matches=[x for x in catalog_search(db,query,limit=250)
-                 if x["provider"] in ("NYFED_DATASET","NYFED_PD")]
+        # Search each publisher namespace independently. Otherwise the
+        # first 250 alphabetical FRED records could hide every NY Fed hit.
+        matches=(catalog_search(db,query,provider="NYFED_DATASET",limit=100)
+                 +catalog_search(db,query,provider="NYFED_PD",limit=150))
     st.caption(f"{report['counts'].get('NYFED_PD',0):,} primary-dealer time series indexed • "+
                f"{report['counts'].get('NYFED_DATASET',0):,} structured data products")
     if report["state"].get("ny_dealers_error"):

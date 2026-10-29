@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime,timezone,date
 from decimal import Decimal
 from typing import Any,Callable
-from urllib.parse import urlencode
+from urllib.parse import urlencode,quote
 from collections import defaultdict
 import hashlib
 
@@ -32,7 +32,7 @@ class NYDataset:
     operation_filter:str|None=None
 
 DATASETS=(
-    NYDataset("NYFED_DATASET:AMBS","Agency MBS operations","Agency MBS",
+    NYDataset("NYFED_DATASET:AMBS","Agency Mortgage-Backed Securities (MBS) Operations","Agency MBS",
               "ambs/all/results/summary/search.json",
               "Agency MBS outright purchases, sales, dollar rolls and coupon swaps: daily accepted par amounts by operation type",
               "totalAmtAcceptedPar","USD","operationType","operations"),
@@ -78,7 +78,7 @@ def request_url(dataset:NYDataset,start:str,end:str)->str:
     params={"startDate":a.isoformat(),"endDate":b.isoformat()}
     if dataset.operation_filter is not None:
         params["operationTypes"]=dataset.operation_filter
-    return NY_BASE+"/"+dataset.endpoint+"?"+urlencode(params)
+    return NY_BASE+"/"+dataset.endpoint+"?"+urlencode(params,quote_via=quote)
 
 
 def _walk_arrays(node:Any,prefix:str="",depth:int=0)->list[tuple[str,list[dict]]]:

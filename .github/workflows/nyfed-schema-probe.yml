@@ -46,9 +46,25 @@ jobs:
                       raw=result.read(5_000_001)
                   if len(raw)>5_000_000:raise ValueError("Large payload; narrow date range")
                   doc=json.loads(raw)
+                  found=arrays(doc)
+                  nested=[]
+                  if label=="Repo operations":
+                      records=(doc.get("repo",{}) or {}).get("operations",[])
+                      for op in records[:20]:
+                          value=op.get("details")
+                          if value:
+                              nested.append({"type":type(value).__name__,
+                                  "fields":list(value[0])[:28] if isinstance(value,list) and value and isinstance(value[0],dict)
+                                        else list(value)[:28] if isinstance(value,dict) else [],
+                                  "count":len(value) if hasattr(value,"__len__") else 0})
+                              if len(nested)>=2:break
+                  if label=="Reference rates":
+                      records=doc.get("refRates",[])
+                      nested=[{"rate_type":r.get("type"),"fields":list(r)[:30]}
+                              for r in records if r.get("type") in ("SOFR","EFFR")][:2]
                   print("SCHEMA",json.dumps({"dataset":label,"ok":True,
                         "envelope":list(doc)[:20] if isinstance(doc,dict) else type(doc).__name__,
-                        "arrays":arrays(doc)[:8]}),flush=True)
+                        "arrays":found[:8],"nested":nested}),flush=True)
               except Exception as exc:
                   print("SCHEMA",json.dumps({"dataset":label,"ok":False,
                         "exception":type(exc).__name__,"message":str(exc)[:180]}),flush=True)

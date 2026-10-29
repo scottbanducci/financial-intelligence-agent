@@ -142,7 +142,7 @@ def _show_ny_chart(result):
                 fig.add_trace(go.Bar(x=[p.date for p in volume.points],
                     y=[float(p.value) for p in volume.points],
                     name=typ+" volume",yaxis="y2",opacity=0.22,
-                    legendgroup=typ,visible="legendonly"))
+                    legendgroup=typ,visible=True if typ=="SOFR" else "legendonly"))
         fig.update_layout(yaxis_title="Reference rate (%)",
             yaxis2=dict(title="Volume (USD billions)",overlaying="y",side="right",
                         showgrid=False),barmode="group")
@@ -218,6 +218,9 @@ def _load_nyfed():
             st.session_state.pop("nyfed_loaded",None)
     loaded=st.session_state.get("nyfed_loaded")
     if loaded is None:return
+    if loaded["id"]!=choice["id"]:
+        st.info("Select Load NY Fed dataset to update the chart to the current dataset.")
+        return
     if loaded["kind"]=="dealer":
         item=_state().get(loaded["id"])
         if item is None:return

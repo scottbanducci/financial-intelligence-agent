@@ -97,6 +97,16 @@ class NYFedDatasets(unittest.TestCase):
         self.assertEqual(r.series["SOFR"].points[0].value,Decimal("3.7"))
         self.assertEqual(r.volume["SOFR"].points[0].value,Decimal(2940))
         self.assertEqual(len(r.detail),2)
+    def test_cancelled_agency_mbs_excluded_not_zero_filled(self):
+        data={"ambs":{"auctions":[
+          {"operationDate":self.A,"operationType":"Purchase","totalAmtAcceptedPar":"100"},
+          {"operationDate":self.A,"operationType":"Purchase","totalAmtAcceptedPar":None,
+           "auctionStatus":"Canceled"}]}}
+        report=fetch_dataset("NYFED_DATASET:AMBS",self.A,self.B,
+              fetch=mocked(data,"ambs/all/results/summary/search.json"))
+        self.assertEqual(len(report.detail),2)
+        self.assertEqual(report.series["Purchase"].points[0].value,Decimal(100))
+        self.assertTrue(any("excluded" in warning for warning in report.warnings))
     def test_missing_measurement_rejected_not_zero(self):
         bad={"treasury":{"auctions":[{"operationDate":self.A,"operationDirection":"P"}]}}
         with self.assertRaisesRegex(ValueError,"Missing"):

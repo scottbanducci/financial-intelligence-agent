@@ -216,12 +216,17 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
         grouped:dict[str,dict[date,Decimal]]=defaultdict(lambda:defaultdict(Decimal))
         security_breakdown:dict[str,dict[date,Decimal]]=defaultdict(lambda:defaultdict(Decimal))
         have_breakdown=False
+        excluded_missing=0
         for row in rows:
             observed=_date(row,d.mode)
             if d.mode=="repo":
                 typ=str(row["operationType"])
                 group=typ if d.operation_filter is None else "Total "+d.operation_filter
-                value=_value(row,("totalAmtAccepted",))
+                amount=_field(row,("totalAmtAccepted",))
+                if dec(amount) is None:
+                    excluded_missing+=1
+                    continue
+                value=dec(amount)
                 # NY Fed repo.operations[].details[] attributes auction
                 # accepted amounts to individual security classes. The
                 # operation-level total must NOT be credited in full to
@@ -249,19 +254,33 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
                 typ=str(row.get("operationDirection","")).upper()
                 if typ not in ("P","S"):raise ValueError("Unrecognized Treasury operationDirection")
                 group="Purchases" if typ=="P" else "Sales"
-                value=_value(row,("totalParAmtAccepted",))
+                amount=_field(row,("totalParAmtAccepted",))
+                if dec(amount) is None:
+                    excluded_missing+=1
+                    continue
+                value=dec(amount)
                 unit="USD"
             elif d.mode=="operations":
                 group=str(row.get("operationType","")).strip()
                 if not group:raise ValueError("AMBS operationType missing")
-                value=_value(row,("totalAmtAcceptedPar","totalParAmtAccepted","totalAmtAccepted"))
+                amount=_field(row,("totalAmtAcceptedPar","totalParAmtAccepted","totalAmtAccepted"))
+                if dec(amount) is None:
+                    excluded_missing+=1
+                    continue
+                value=dec(amount)
                 unit="USD"
             else:
                 group=str(row.get("currency","")).strip().upper()
                 if not group:raise ValueError("Liquidity swap currency missing")
-                value=_value(row,("amount","totalAmtAccepted","totalAmount","amountAccepted","usdAmount"))
+                amount=_field(row,("amount","totalAmtAccepted","totalAmount","amountAccepted","usdAmount"))
+                if dec(amount) is None:
+                    excluded_missing+=1
+                    continue
+                value=dec(amount)
                 unit=group
             grouped[group][observed]+=value
+        if excluded_missing:
+            warnings.append(f"{excluded_missing} operation records lack accepted amounts and were excluded from sums; original rows remain in the detail table.")
         if d.mode=="repo" and d.operation_filter is not None and have_breakdown:
             for name,points in sorted(security_breakdown.items()):
                 grouped["Security: "+name]=points

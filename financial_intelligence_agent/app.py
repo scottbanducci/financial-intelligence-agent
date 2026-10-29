@@ -230,44 +230,57 @@ elif page=="Analyst agent":
                 st.error("Model planning unavailable: "+str(exc))
 
 else:
-    from financial_intelligence_agent.live.providers import catalog as public_catalog
+    from contextlib import closing
+    from financial_intelligence_agent.live.catalog_index import (
+        get_connection, search as browse_index, status as index_status, release_list)
     from financial_intelligence_agent.live.databricks_gold import descriptors as gold_catalog
-    header("07 / Data inventory","Source catalog and provenance",
-           "Discover supported published series; live source coverage is distinct from the fixed tutorial fixture.")
-    st.markdown("#### Analyst-accessible published series")
-    rows=[{"Provider":d.provider,"Series ID":d.id,"Description":d.label,
-           "Unit":d.unit,"Frequency":d.frequency,"Publication source":d.source_url}
-          for d in public_catalog()]
+    header("07 / Data inventory","Publisher catalog and provenance",
+           "Search the same release-driven FRED and curated NY Fed metadata index used by Live Data Studio.")
+    with closing(get_connection()) as db:
+        current=index_status(db)
+        found_releases=release_list(db)
+    counts=current["counts"]
+    a,b,c=st.columns(3)
+    a.metric("Indexed FRED series",f'{counts.get("FRED",0):,}')
+    b.metric("NY Fed primary dealer series",f'{counts.get("NYFED_PD",0):,}')
+    c.metric("NY Fed analytical datasets",f'{counts.get("NYFED_DATASET",0):,}')
+    progress=current["fred_releases"]
+    completed=progress.get("done",0)
+    total=sum(progress.values())
+    st.caption(f"FRED releases: {completed}/{total} indexed. "+
+       ("Catalog complete." if current["state"].get("fred_complete")=="true"
+        else "Metadata indexing still in progress; search results may be partial."))
+    st.markdown("#### Search publisher data products")
+    provider=st.selectbox("Provider",["FRED","NY Fed datasets","NY Fed primary dealers"])
+    selected={"FRED":"FRED","NY Fed datasets":"NYFED_DATASET",
+              "NY Fed primary dealers":"NYFED_PD"}[provider]
+    term=st.text_input("Search ID, title, description or release",key="catalog_filter")
+    with closing(get_connection()) as db:
+        results=browse_index(db,term[:140],provider=selected,limit=150)
+    if term!=term[:140]:st.warning("Search limited to 140 characters")
+    if results:
+        st.dataframe(pd.DataFrame(results)[["id","label","unit","frequency","source_url"]],
+             hide_index=True,use_container_width=True,height=370)
+    else:
+        st.info("No indexed matches. Refine your search or check catalog crawl progress.")
+    if selected=="FRED":
+        with st.expander("Browse official FRED releases"):
+            st.dataframe(pd.DataFrame(found_releases),hide_index=True,use_container_width=True)
+    st.caption("Primary Dealer keyids represent individual publisher time series. "+
+       "Other NY Fed entries represent defined daily datasets, not arbitrary API endpoints.")
     try:
-        rows.extend({"Provider":d.provider,"Series ID":d.id,"Description":d.label,
-                     "Unit":d.unit,"Frequency":d.frequency,"Publication source":d.source_url}
-                    for d in gold_catalog(os.getenv("DATABRICKS_CATALOG","fed_monitor")))
+        st.markdown("#### Existing Databricks Gold metrics")
+        gold=gold_catalog(os.getenv("DATABRICKS_CATALOG","fed_monitor"))
+        st.dataframe(pd.DataFrame([{
+            "Metric":d.id,"Unit":d.unit,"Frequency":d.frequency,
+            "Gold table":d.source_url} for d in gold]),hide_index=True,use_container_width=True)
     except ValueError:
-        pass
-    filter_text=st.text_input("Filter catalog",placeholder="SOFR, reserves, bank credit...")
-    listed=pd.DataFrame(rows)
-    if filter_text.strip():
-        listed=listed[listed.astype(str).apply(
-            lambda col:col.str.contains(filter_text.strip(),case=False,regex=False)).any(axis=1)]
-    st.dataframe(listed,hide_index=True,use_container_width=True,height=370)
-    st.caption("The published NY Fed dealer catalog contains additional dynamically discovered identifiers; load it in Live Data Studio. FRED also supports full catalog search using a key.")
-    st.subheader("Source connection states")
-    providers=[
-        ("FRED / ALFRED","Live FRED search and current observations","Requires FRED_API_KEY or per-user key; PIT revisions incomplete"),
-        ("NY Fed Rates","Live verified public Markets API","Funding reference rates available without a standard key"),
-        ("NY Fed Dealers","Live verified dealer discovery and sample history","1,539 publisher series entries found during a live probe"),
-        ("FDIC","Live verified bank-level reports and panels","Bank merges, units, filing revisions require care"),
-        ("FFIEC CDR","Bulk tab-delimited import","Automatic raw CDR download not deployed"),
-        ("Databricks Gold","Allowlisted read-only SQL adapter","Warehouse and permissions must be configured"),
-        ("Analyst uploads","CSV/FFIEC import","User supplied metadata not independently audited"),
-    ]
-    st.dataframe(pd.DataFrame(providers,columns=["Provider","Access","Important limitation"]),hide_index=True,use_container_width=True)
-    st.subheader("Tutorial fixture freshness")
+        st.warning("Invalid Gold catalog configuration.")
+    st.subheader("Historical demonstration fixture freshness")
     fresh=engine.invoke("get_data_freshness")
     st.dataframe(pd.DataFrame([{"Fixture":key,**val} for key,val in fresh["sources"].items()]),
                  hide_index=True,use_container_width=True)
-    st.markdown("**Data-quality contract:** explicit units, exact date alignment, explicit frequency transformations, missing values never imputed silently, and no invented publication vintages.")
-    st.caption("Macro tutorial fingerprint "+engine.macro.id)
-    st.caption("Funding tutorial fingerprint "+engine.rates.snapshot_id)
-    with st.expander("Original bounded agent tools"):
+    st.caption("Publisher indexing and data collection are distinct: the original Databricks Gold pipeline"+
+               " still ingests its separately configured 18 FRED series.")
+    with st.expander("Original deterministic agent tools"):
         st.table(pd.DataFrame([{"Tool":k,"Purpose":v} for k,v in TOOLS.items()]))

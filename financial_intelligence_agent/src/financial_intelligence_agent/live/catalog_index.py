@@ -1,339 +1,308 @@
-"""Persistent, startup-warmed publisher metadata index.
+"""Searchable publisher *datasets*, warmed at startup and persisted in SQLite.
 
-FRED has no single 'list every series' API call. Its official category tree
-and paginated category/series methods can enumerate the catalog, but doing so
-synchronously would freeze the application and consume many requests. This
-service crawls incrementally in a single background worker, persists progress
-in SQLite, and serves searches locally. It NEVER indexes observation values
-or credentials. No publication claims about an incomplete crawl.
+FRED is enumerated by release -> release/series (NOT categories), with page
+checkpoints and series/release memberships. NY Fed exposes curated dataset
+contracts, plus dynamically published primary-dealer keyids. No NY_ENDPOINT
+templates are presented as if they were datasets.
 
-NY Fed's published OpenAPI YAML describes endpoint families, not all distinct
-statistical time series. We index the GET endpoints and separately ingest the
-primary dealer timeseries metadata (individual keyids). Operations remain
-record-level datasets; they are not falsely presented as individual series.
+A cold full FRED crawl takes many HTTP calls and runs in a daemon thread;
+never claim completeness until every release and its pages are checked.
 """
 from __future__ import annotations
-
-import json
 import os
 import re
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 from datetime import datetime, timezone
+from urllib.parse import urlencode
+from typing import Any,Callable,Mapping
 
 from financial_intelligence_agent.live.providers import (
-    Descriptor, catalog as seed_catalog, dealer_catalog, FRED_PRESETS, _get, NY_BASE,
+    Descriptor,catalog as seed_catalog,dealer_catalog,_get,
 )
+from financial_intelligence_agent.live.nyfed_datasets import dataset_descriptors
 
-DB_DEFAULT = Path(__file__).resolve().parents[3] / ".cache" / "publisher_catalog.sqlite3"
-NY_SPEC_URL = "https://markets.newyorkfed.org/static/docs/markets-api.yml"
-FRED_ROOT = "https://api.stlouisfed.org/fred/"
-MAX_FRED_REQUESTS = 30000
-MAX_FRED_SERIES = 1_000_000
-SLEEP_SECONDS = 0.15
-_LOCK = threading.RLock()
-_WORKERS: dict[str, threading.Thread] = {}
-_STOP = threading.Event()
+DB_DEFAULT=Path(__file__).resolve().parents[3]/".cache"/"publisher_catalog.sqlite3"
+FRED_ROOT="https://api.stlouisfed.org/fred/"
+MAX_FRED_REQUESTS=30000
+MAX_FRED_SERIES=1_000_000
+SLEEP_SECONDS=0.15
+_LOCK=threading.RLock()
+_WORKERS:dict[str,threading.Thread]={}
 
 
-def get_connection(path: str | Path = DB_DEFAULT) -> sqlite3.Connection:
+def get_connection(path:str|Path=DB_DEFAULT)->sqlite3.Connection:
     path=Path(path)
     path.parent.mkdir(parents=True,exist_ok=True)
-    db=sqlite3.connect(str(path),timeout=25,check_same_thread=False)
+    db=sqlite3.connect(str(path),timeout=30,check_same_thread=False)
     db.execute("PRAGMA journal_mode=WAL")
-    db.execute("PRAGMA busy_timeout=25000")
+    db.execute("PRAGMA busy_timeout=30000")
     db.executescript("""
-    CREATE TABLE IF NOT EXISTS entries(
-      id TEXT PRIMARY KEY, label TEXT NOT NULL, provider TEXT NOT NULL,
-      unit TEXT NOT NULL, frequency TEXT NOT NULL, category TEXT NOT NULL,
-      source_url TEXT NOT NULL, convention TEXT NOT NULL,
-      kind TEXT NOT NULL, endpoint TEXT NOT NULL DEFAULT '',
+    CREATE TABLE IF NOT EXISTS entries (
+      id TEXT PRIMARY KEY,label TEXT NOT NULL,provider TEXT NOT NULL,
+      unit TEXT NOT NULL,frequency TEXT NOT NULL,category TEXT NOT NULL,
+      source_url TEXT NOT NULL,convention TEXT NOT NULL,
+      kind TEXT NOT NULL,endpoint TEXT NOT NULL DEFAULT '',
       updated_utc TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS entries_provider_idx ON entries(provider);
-    CREATE TABLE IF NOT EXISTS crawl_state(name TEXT PRIMARY KEY, value TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS fred_categories(
-      category_id INTEGER PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending');
+    CREATE TABLE IF NOT EXISTS crawl_state(name TEXT PRIMARY KEY,value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS fred_releases (
+      release_id INTEGER PRIMARY KEY,name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      next_offset INTEGER NOT NULL DEFAULT 0,
+      expected_count INTEGER NOT NULL DEFAULT -1);
+    CREATE TABLE IF NOT EXISTS fred_release_members (
+      release_id INTEGER NOT NULL,
+      series_id TEXT NOT NULL,
+      PRIMARY KEY(release_id,series_id));
+    CREATE INDEX IF NOT EXISTS fred_release_members_sid
+      ON fred_release_members(series_id);
     """)
     return db
 
 
-def _stamp() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _stamp()->str:return datetime.now(timezone.utc).isoformat()
 
 
 def put_entry(db:sqlite3.Connection,d:Descriptor,*,kind:str="series",endpoint:str="")->None:
     db.execute("""INSERT INTO entries VALUES (?,?,?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(id) DO UPDATE SET label=excluded.label, unit=excluded.unit,
-      frequency=excluded.frequency, category=excluded.category,
-      source_url=excluded.source_url, convention=excluded.convention,
-      kind=excluded.kind, endpoint=excluded.endpoint, updated_utc=excluded.updated_utc""",
+    ON CONFLICT(id) DO UPDATE SET label=excluded.label,provider=excluded.provider,
+      unit=excluded.unit,frequency=excluded.frequency,category=excluded.category,
+      source_url=excluded.source_url,convention=excluded.convention,
+      kind=excluded.kind,endpoint=excluded.endpoint,updated_utc=excluded.updated_utc""",
        (d.id,d.label,d.provider,d.unit,d.frequency,d.category,
         d.source_url,d.convention,kind,endpoint,_stamp()))
 
 
 def seed(db:sqlite3.Connection)->None:
+    # Migrate the pre-existing endpoint-driven index in place.
+    db.execute("DELETE FROM entries WHERE provider IN ('NY_ENDPOINT','NYFED')")
     for d in seed_catalog():
-        put_entry(db,d)
-    db.execute("INSERT OR IGNORE INTO fred_categories(category_id,status) VALUES(0,'pending')")
-    # A small documented fallback is immediately searchable even when the
-    # NY Fed schema service is temporarily unavailable at app startup.
-    base = (
-        ("rp/results/search.json","Repo / reverse repo operation results","Repo and reverse repo operations"),
-        ("pd/list/timeseries.json","Primary dealer statistical series catalog","Primary Dealer Statistics"),
-        ("seclending/all/results/summary/latest.json","Securities lending operations summary","Securities Lending Operations"),
-    )
-    for endpoint,label,category in base:
-        put_entry(db,Descriptor("NY_ENDPOINT:"+endpoint,label,"NY_ENDPOINT",
-                  "varies","irregular",category,NY_BASE+"/"+endpoint,
-                  "publisher_specification"),kind="endpoint_template",endpoint=endpoint)
+        if d.provider=="FRED":put_entry(db,d)
+    for d in dataset_descriptors():
+        put_entry(db,d,kind="dataset",endpoint=d.source_url)
     db.commit()
 
 
-def search(db:sqlite3.Connection,term:str,*,limit:int=100)->list[dict]:
-    if not isinstance(term,str) or len(term)>140:
-        raise ValueError("Search must be 0..140 characters")
-    if type(limit) is not int or not 1<=limit<=250:
-        raise ValueError("Search page limit must be 1..250")
-    term=term.strip().lower()
-    if term:
-        # Literal substring matching; no user-supplied SQL grammar or LIKE
-        # wildcards. ID-first ordering brings exact series keys to the top.
-        rows=db.execute("""SELECT id,label,provider,unit,frequency,category,
-                   source_url,convention,kind,endpoint FROM entries
-             WHERE instr(lower(id),?)>0 OR instr(lower(label),?)>0
-                OR instr(lower(category),?)>0
-             ORDER BY CASE WHEN lower(id)=? THEN 0
-                  WHEN lower(id) LIKE ? THEN 1 ELSE 2 END, label
-             LIMIT ?""",
-             (term,term,term,term,term+"%",limit)).fetchall()
-    else:
-        rows=db.execute("""SELECT id,label,provider,unit,frequency,category,
-                   source_url,convention,kind,endpoint FROM entries
-             ORDER BY CASE provider WHEN 'NYFED_PD' THEN 1
-                       WHEN 'FRED' THEN 0 ELSE 2 END, label LIMIT ?""",(limit,)).fetchall()
-    keys=("id","label","provider","unit","frequency","category","source_url","convention","kind","endpoint")
-    return [dict(zip(keys,r)) for r in rows]
-
-
 def status(db:sqlite3.Connection)->dict:
-    counts=dict(db.execute("SELECT provider,COUNT(*) FROM entries GROUP BY provider").fetchall())
-    state=dict(db.execute("SELECT name,value FROM crawl_state").fetchall())
-    progress=dict(db.execute("SELECT status,COUNT(*) FROM fred_categories GROUP BY status").fetchall())
-    return {"counts":counts,"fred_categories":progress,"state":state}
+    counts=dict(db.execute("SELECT provider,COUNT(*) FROM entries GROUP BY provider"))
+    states=dict(db.execute("SELECT name,value FROM crawl_state"))
+    progress=dict(db.execute("SELECT status,COUNT(*) FROM fred_releases GROUP BY status"))
+    return {"counts":counts,"fred_releases":progress,"state":states}
 
 
-def _state(db:sqlite3.Connection,key:str,value:str)->None:
-    db.execute("INSERT INTO crawl_state(name,value) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value",(key,value))
+def _state(db:sqlite3.Connection,key:str,val:str)->None:
+    db.execute("""INSERT INTO crawl_state VALUES(?,?)
+    ON CONFLICT(name) DO UPDATE SET value=excluded.value""",(key,val))
 
 
-def _safe_api(url:str,fetch:Callable[...,dict]|None=None)->dict:
+def _fred_descriptor(item:Mapping[str,Any])->Descriptor|None:
+    sid=item.get("id","")
+    if not isinstance(sid,str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,60}",sid):return None
+    unit=str(item.get("units","source-native"))[:100]
+    if unit.lower() in ("billions of dollars","billions of u.s. dollars"):unit="Billions of USD"
+    elif unit.lower() in ("millions of dollars","millions of u.s. dollars"):unit="Millions of USD"
+    elif unit.lower()=="percent":unit="percent"
+    frequency={"D":"daily","W":"weekly","M":"monthly","Q":"quarterly","A":"annual"}.get(
+        item.get("frequency_short"),"irregular")
+    return Descriptor("FRED:"+sid,str(item.get("title",sid))[:200],
+                      "FRED",unit,frequency,"FRED release series",
+                      "https://fred.stlouisfed.org/series/"+sid,"FRED_realtime_vintage")
+
+
+def _api(url:str,fetch:Callable[...,dict]|None)->dict:
     return _get(url,"api.stlouisfed.org",fetch)
 
 
-def _fred_descriptor(row:Mapping[str,Any])->Descriptor|None:
-    ident=row.get("id","")
-    if not isinstance(ident,str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,60}",ident):
-        return None
-    unit=str(row.get("units","source-native"))[:100]
-    low=unit.lower()
-    if low=="percent":unit="percent"
-    elif low in {"billions of dollars","billions of u.s. dollars"}:unit="Billions of USD"
-    elif low in {"millions of dollars","millions of u.s. dollars"}:unit="Millions of USD"
-    freqs={"D":"daily","W":"weekly","M":"monthly","Q":"quarterly","A":"annual"}
-    freq=freqs.get(row.get("frequency_short"),"irregular")
-    title=str(row.get("title",ident))[:200]
-    return Descriptor("FRED:"+ident,title,"FRED",unit,freq,
-                      "FRED category catalog","https://fred.stlouisfed.org/series/"+ident,
-                      "FRED_realtime_vintage")
+def _get_page(api_path:str,params:dict,fetch:Callable[...,dict]|None)->dict:
+    return _api(FRED_ROOT+api_path+"?"+urlencode(params),fetch)
 
 
 def crawl_fred(db:sqlite3.Connection,api_key:str, *,
               fetch:Callable[...,dict]|None=None,max_requests:int=MAX_FRED_REQUESTS,
               sleep:Callable[[float],Any]=time.sleep)->dict:
-    """Resumable exhaustive-by-category FRED traversal, not a keyword sample.
+    """Fetch ALL release metadata, then every release's paginated series.
 
-    Completeness is asserted only after all discovered categories and their
-    pagination have completed. FRED may list a series in several categories;
-    the series ID is the stable deduplication key.
+    Offset is checkpointed after each successful page. The same series may
+    belong to multiple releases; record every membership, deduplicate series.
+    A failed request retains the pending release and never marks completion.
     """
     if not re.fullmatch(r"[a-z0-9]{32}",api_key):
-        raise ValueError("Server-side FRED_API_KEY is missing/invalid")
+        raise ValueError("FRED_API_KEY must be a server-side 32-character key")
     if type(max_requests) is not int or not 1<=max_requests<=MAX_FRED_REQUESTS:
-        raise ValueError("Invalid crawl request budget")
-    requests=0
-    while requests<max_requests:
-        item=db.execute("SELECT category_id FROM fred_categories WHERE status='pending' ORDER BY category_id LIMIT 1").fetchone()
-        if item is None:
+        raise ValueError("Invalid crawl request limit")
+    calls=0
+    common={"api_key":api_key,"file_type":"json","limit":1000}
+    if dict(db.execute("SELECT name,value FROM crawl_state")).get("fred_releases_loaded")!="true":
+        try:
+            offset=0
+            while calls<max_requests:
+                payload=_get_page("releases",{**common,"offset":offset},fetch)
+                calls+=1
+                records=payload.get("releases")
+                if not isinstance(records,list):raise ValueError("Malformed FRED releases response")
+                count=int(payload.get("count",-1))
+                if count<0:raise ValueError("Missing release count")
+                for release in records:
+                    rid=release.get("id")
+                    if type(rid) is int and rid>=0:
+                        db.execute("""INSERT INTO fred_releases(release_id,name)
+                                      VALUES(?,?) ON CONFLICT(release_id)
+                                      DO UPDATE SET name=excluded.name""",
+                                   (rid,str(release.get("name",rid))[:200]))
+                offset+=len(records)
+                db.commit()
+                if offset>=count:
+                    _state(db,"fred_releases_loaded","true")
+                    db.commit()
+                    break
+                if not records:raise ValueError("Releases pagination stalled")
+                if sleep:sleep(SLEEP_SECONDS)
+        except Exception:
+            _state(db,"fred_error","Release enumeration interrupted; retry on next app restart")
+            db.commit()
+            return status(db)
+    if dict(db.execute("SELECT name,value FROM crawl_state")).get("fred_releases_loaded")!="true":
+        return status(db)
+    while calls<max_requests:
+        entry=db.execute("""SELECT release_id,next_offset
+          FROM fred_releases WHERE status='pending' ORDER BY release_id LIMIT 1""").fetchone()
+        if entry is None:
             _state(db,"fred_complete","true")
             _state(db,"fred_updated",_stamp())
+            _state(db,"fred_error","")
             db.commit()
             break
-        cat=int(item[0])
-        # In a failed/partial request, category remains pending and no false
-        # completed flag is written. Finished pages are upserted idempotently.
+        rid,offset=entry
         try:
-            children=_safe_api(FRED_ROOT+"category/children?"+urlencode({
-                "category_id":cat,"api_key":api_key,"file_type":"json"}),fetch)
-            requests+=1
-            if not isinstance(children.get("categories"),list):
-                raise ValueError("Malformed FRED category children")
-            for child in children["categories"]:
-                child_id=child.get("id")
-                if type(child_id) is int and child_id>=0:
-                    db.execute("INSERT OR IGNORE INTO fred_categories(category_id,status) VALUES(?,'pending')",(child_id,))
-            offset=0
-            while requests<max_requests:
-                params=urlencode({"category_id":cat,"api_key":api_key,
-                                  "file_type":"json","limit":1000,"offset":offset})
-                payload=_safe_api(FRED_ROOT+"category/series?"+params,fetch)
-                requests+=1
-                rows=payload.get("seriess")
-                if not isinstance(rows,list):
-                    raise ValueError("Malformed FRED category series response")
-                for row in rows:
-                    descriptor=_fred_descriptor(row)
-                    if descriptor:
-                        put_entry(db,descriptor)
-                count=int(payload.get("count",-1))
-                if count<0:raise ValueError("Missing FRED pagination count")
-                offset+=len(rows)
-                db.commit()
-                if offset>=count:break
-                if not rows:raise ValueError("FRED pagination made no progress")
-                if sleep:sleep(SLEEP_SECONDS)
-            if offset>=count:
-                db.execute("UPDATE fred_categories SET status='done' WHERE category_id=?",(cat,))
-                db.commit()
-            if sleep:sleep(SLEEP_SECONDS)
+            response=_get_page("release/series",{
+                **common,"release_id":rid,"offset":offset},fetch)
+            calls+=1
+            records=response.get("seriess")
+            if not isinstance(records,list):raise ValueError("Malformed release/series response")
+            count=int(response.get("count",-1))
+            if count<0:raise ValueError("Missing release/series count")
+            for item in records:
+                descriptor=_fred_descriptor(item)
+                if descriptor is None:continue
+                put_entry(db,descriptor)
+                db.execute("""INSERT OR IGNORE INTO fred_release_members
+                               VALUES (?,?)""",(rid,descriptor.id))
+            new_offset=offset+len(records)
+            if new_offset>=count:
+                db.execute("""UPDATE fred_releases SET status='done',
+                              next_offset=?,expected_count=? WHERE release_id=?""",
+                           (new_offset,count,rid))
+            else:
+                if not records:raise ValueError("Release page made no progress")
+                db.execute("""UPDATE fred_releases SET next_offset=?,expected_count=?
+                              WHERE release_id=?""",(new_offset,count,rid))
+            db.commit()
+            if db.execute("SELECT COUNT(*) FROM entries WHERE provider='FRED'").fetchone()[0]>MAX_FRED_SERIES:
+                raise ValueError("FRED index row limit reached")
         except Exception:
-            _state(db,"fred_error","A category request failed; crawl can resume after restart")
-            _state(db,"fred_updated",_stamp())
+            _state(db,"fred_error","Release series ingestion interrupted; retry on next app restart")
             db.commit()
             break
-        if db.execute("SELECT COUNT(*) FROM entries WHERE provider='FRED'").fetchone()[0]>MAX_FRED_SERIES:
-            _state(db,"fred_error","Catalog exceeded configured maximum series count")
-            db.commit()
-            break
+        if sleep:sleep(SLEEP_SECONDS)
     _state(db,"fred_updated",_stamp())
     db.commit()
     return status(db)
 
 
-def _get_swagger(url:str=NY_SPEC_URL)->dict:
-    # URL is fixed by this module; no user-supplied address.
-    import yaml
-    req=Request(url,headers={"User-Agent":"liquidity-intelligence/0.4"})
-    with urlopen(req,timeout=20) as response:
-        raw=response.read(5_000_001)
-    if len(raw)>5_000_000:raise ValueError("NY Fed spec exceeds 5 MB limit")
-    result=yaml.safe_load(raw)
-    if not isinstance(result,dict) or not isinstance(result.get("paths"),dict):
-        raise ValueError("Invalid NY Fed API specification")
-    return result
+def search(db:sqlite3.Connection,term:str,*,provider:str|None=None,
+           release_id:int|None=None,limit:int=150)->list[dict]:
+    """Local provider-scoped, release-aware search of named datasets."""
+    if not isinstance(term,str) or len(term)>140:raise ValueError("Search exceeds 140 characters")
+    if provider is not None and provider not in {"FRED","NYFED_DATASET","NYFED_PD"}:
+        raise ValueError("Unknown search provider")
+    if type(limit) is not int or not 1<=limit<=250:raise ValueError("Limit must be 1..250")
+    words=term.casefold().strip().split()
+    sql="""SELECT DISTINCT e.id,e.label,e.provider,e.unit,e.frequency,e.category,
+                   e.source_url,e.convention,e.kind,e.endpoint FROM entries e
+                   LEFT JOIN fred_release_members m ON m.series_id=e.id
+                   LEFT JOIN fred_releases r ON r.release_id=m.release_id
+                   WHERE 1=1"""
+    args=[]
+    if provider is not None:
+        sql+=" AND e.provider=?";args.append(provider)
+    if release_id is not None:
+        sql+=" AND m.release_id=?";args.append(release_id)
+    for word in words:
+        sql+=" AND (instr(lower(e.id),?)>0 OR instr(lower(e.label),?)>0 OR instr(lower(e.category),?)>0 OR instr(lower(coalesce(r.name,'')),?)>0)"
+        args.extend([word]*4)
+    sql+=" ORDER BY e.label LIMIT ?"
+    args.append(limit)
+    result=db.execute(sql,args).fetchall()
+    keys=("id","label","provider","unit","frequency","category","source_url","convention","kind","endpoint")
+    return [dict(zip(keys,row)) for row in result]
 
 
-def ny_spec_entries(spec:Mapping[str,Any])->list[tuple[Descriptor,str]]:
-    """Index all published GET paths as endpoint templates, not fake series."""
-    paths=spec.get("paths",{})
-    output=[]
-    if not isinstance(paths,dict):raise ValueError("Swagger paths missing")
-    for path,methods in paths.items():
-        if not isinstance(path,str) or not isinstance(methods,dict) or "get" not in methods:continue
-        operation=methods["get"]
-        if not isinstance(operation,dict):continue
-        label=str(operation.get("summary") or operation.get("operationId") or path)[:180]
-        # Retain templates in metadata but do not generate network requests
-        # from unresolved {parameter} segments.
-        endpoint=path.removeprefix("/api/").lstrip("/")
-        # Swagger may express a format placeholder instead of a literal
-        # extension; index the documented JSON representation when available.
-        for suffix in (".{fileType}",".{format}",".{file_type}",".{fType}"):
-            if endpoint.endswith(suffix):
-                endpoint=endpoint[:-len(suffix)]+".json"
-        if not endpoint.startswith(("rp/","pd/","rates/","seclending/","soma/","tsy/","ambs/","cb/","cbliquidity/")):
-            continue
-        if not endpoint.endswith(".json"):continue
-        tag=(operation.get("tags") or ["New York Fed Markets"])[0]
-        ident="NY_ENDPOINT:"+endpoint
-        desc=Descriptor(ident,label,"NY_ENDPOINT","varies","irregular",
-                        str(tag),NY_BASE+"/"+endpoint,"publisher_specification")
-        output.append((desc,endpoint))
-    return output
+def release_list(db:sqlite3.Connection,*,term:str="")->list[dict]:
+    rows=db.execute("""SELECT r.release_id,r.name,r.status,r.next_offset,
+      COUNT(m.series_id) AS member_count FROM fred_releases r
+      LEFT JOIN fred_release_members m ON m.release_id=r.release_id
+      WHERE instr(lower(r.name),?)>0 GROUP BY r.release_id ORDER BY r.name""",
+      (term.casefold(),)).fetchall()
+    return [{"id":a,"name":b,"status":c,"offset":d,"series":e} for a,b,c,d,e in rows]
 
 
-def warm_ny(db:sqlite3.Connection,*,dealers:Callable[[],list[Descriptor]]=dealer_catalog,
-            spec_loader:Callable[[],dict]=_get_swagger)->dict:
+def warm_ny(db:sqlite3.Connection, *,
+            dealers:Callable[[],list[Descriptor]]=dealer_catalog)->dict:
     try:
-        for descriptor in dealers():
+        found=dealers()
+        if not found:raise ValueError("No dealer metadata returned")
+        for descriptor in found:
             put_entry(db,descriptor,kind="series",endpoint=descriptor.source_url)
         _state(db,"ny_dealers_updated",_stamp())
+        _state(db,"ny_dealers_error","")
         db.commit()
     except Exception:
-        _state(db,"ny_dealers_error","Dealer metadata unavailable; using existing cached catalog")
-        db.commit()
-    try:
-        for descriptor,path in ny_spec_entries(spec_loader()):
-            put_entry(db,descriptor,kind="endpoint_template",endpoint=path)
-        _state(db,"ny_spec_updated",_stamp())
-        db.commit()
-    except Exception:
-        _state(db,"ny_spec_error","Publisher specification unavailable; using cached endpoints")
+        _state(db,"ny_dealers_error","Dealer metadata fetch unavailable; cached series retained")
         db.commit()
     return status(db)
 
 
-def bootstrap(path:str|Path=DB_DEFAULT, *,enable_network:bool=True)->dict:
-    """Seed synchronously, start metadata warming once per process.
-
-    Does not block browser first paint. The working index is available
-    immediately and becomes richer as startup crawlers finish.
-    """
+def bootstrap(path:str|Path=DB_DEFAULT,*,enable_network:bool=True)->dict:
     path=Path(path).resolve()
     with _LOCK:
         db=get_connection(path)
         try:
             seed(db)
-            # A completed FRED census should eventually refresh, rather than
-            # leaving the same static catalog forever after its first run.
-            state=dict(db.execute("SELECT name,value FROM crawl_state").fetchall())
-            if state.get("fred_complete")=="true" and state.get("fred_updated"):
+            states=dict(db.execute("SELECT name,value FROM crawl_state"))
+            if states.get("fred_complete")=="true" and states.get("fred_updated"):
                 try:
-                    updated=datetime.fromisoformat(state["fred_updated"])
-                    age=(datetime.now(timezone.utc)-updated).total_seconds()
-                    if age>7*86400:
-                        db.execute("UPDATE fred_categories SET status='pending'")
-                        db.execute("DELETE FROM crawl_state WHERE name='fred_complete'")
-                        db.commit()
-                except ValueError:
-                    db.execute("DELETE FROM crawl_state WHERE name='fred_complete'")
+                    stale=(datetime.now(timezone.utc)-datetime.fromisoformat(states["fred_updated"])).total_seconds()>7*86400
+                except ValueError:stale=True
+                if stale:
+                    db.execute("UPDATE fred_releases SET status='pending',next_offset=0,expected_count=-1")
+                    db.execute("DELETE FROM crawl_state WHERE name IN ('fred_complete','fred_releases_loaded')")
                     db.commit()
         finally:db.close()
-        if enable_network and str(path) not in _WORKERS:
-            def work():
+        existing=_WORKERS.get(str(path))
+        if enable_network and (existing is None or not existing.is_alive()):
+            def worker():
                 c=get_connection(path)
                 try:
                     warm_ny(c)
-                    key=os.getenv("FRED_API_KEY","")
-                    if key:
-                        crawl_fred(c,key)
+                    if os.getenv("FRED_API_KEY"):
+                        crawl_fred(c,os.environ["FRED_API_KEY"])
                     else:
-                        _state(c,"fred_error","FRED_API_KEY not configured; FRED full crawl not started")
+                        _state(c,"fred_error","FRED_API_KEY not set; release crawl not started")
                         c.commit()
                 finally:c.close()
-            thread=threading.Thread(target=work,name="publisher-metadata-warm",daemon=True)
-            _WORKERS[str(path)]=thread
-            thread.start()
-        return {"db_path":str(path),"worker_running":_WORKERS.get(str(path),None) is not None}
+            task=threading.Thread(target=worker,name="publisher-release-metadata",daemon=True)
+            _WORKERS[str(path)]=task
+            task.start()
+        return {"db_path":str(path),"worker_running":bool(enable_network)}
 
 
 def lookup(db:sqlite3.Connection,key:str)->dict|None:
-    rows=db.execute("""SELECT id,label,provider,unit,frequency,category,source_url,convention,kind,endpoint
-                       FROM entries WHERE id=?""",(key,)).fetchall()
-    cols=("id","label","provider","unit","frequency","category","source_url","convention","kind","endpoint")
-    return dict(zip(cols,rows[0])) if rows else None
+    rows=search(db,"",limit=250)
+    r=db.execute("""SELECT id,label,provider,unit,frequency,category,source_url,
+                    convention,kind,endpoint FROM entries WHERE id=?""",(key,)).fetchone()
+    if not r:return None
+    return dict(zip(("id","label","provider","unit","frequency","category",
+                     "source_url","convention","kind","endpoint"),r))

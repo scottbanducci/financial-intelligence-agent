@@ -1,81 +1,95 @@
-# Startup catalog, API secrets, and operation-level data
+# Release-first FRED and dataset-first NY Fed discovery
 
-## Set up FRED credentials (server only)
+The Live Data Studio now has separate FRED and NY Fed tabs. FDIC, Databricks
+Gold, FFIEC and CSV import remain in adjacent tabs.
 
-Do not commit your FRED API key to a GitHub branch. The Live Data Studio
-no longer offers any API key input control or curated series selector.
+## FRED metadata discovery
 
-On Windows PowerShell from the financial_intelligence_agent directory:
+On app startup the index service requests /fred/releases in pages, then uses
+/fred/release/series for every listed release, paging until all series
+metadata for that release have been collected. Release ID, name and
+series membership are stored in SQLite alongside unique series metadata.
+A series may belong to more than one release. Categories are not queried.
 
-    Copy-Item .env.example .env
-    notepad .env
-    python -m streamlit run app.py
+The SQLite index is at .cache/publisher_catalog.sqlite3. It is searchable
+locally while a background job crawls. Cold start is deliberately
+nonblocking: an entire FRED crawl can involve many requests and does not
+finish instantly. The UI reports release coverage and incomplete status,
+and stores page offsets for a resumable crawl.
 
-In .env, replace the FRED_API_KEY placeholder with the actual key. The app
-loads the untracked local .env on startup, and production should use a managed
-server secret. .env is excluded from the Docker build and ignored by Git.
-This commit deliberately contains NO user's FRED key.
+The server must have FRED_API_KEY configured. Copy .env.example to an
+untracked local .env, or use a production secret manager. No key is
+collected from the browser or committed to GitHub.
 
-## Catalog discovery and search
+Official sources:
+https://fred.stlouisfed.org/docs/api/fred/releases.html
+https://fred.stlouisfed.org/docs/api/fred/release_series.html
 
-FRED does not expose a single endpoint listing every live series. It exposes
-a category hierarchy and paginated series listings. On startup, the app:
-- Seeds a local SQLite index of known reference series and NY Fed endpoints.
-- Fetches New York Fed primary-dealer keyid/description metadata.
-- Fetches the NY Fed OpenAPI YAML to index published GET JSON endpoint
-  templates. Templates are not automatically numerical time series.
-- Incrementally traverses FRED categories, fetching 1,000 series metadata
-  entries per page, deduplicating by ID, and checkpointing completed nodes.
+## NY Fed analyst data products
 
-This scan runs in a background thread to prevent page-launch delays and
-request spikes. Database: .cache/publisher_catalog.sqlite3. Searches query
-SQLite locally, not the remote APIs. A fresh install reports INCOMPLETE
-FRED index status until all categories have been processed. Partial,
-failed, and missing-key cases are clearly marked.
+The local search index now contains seven named data products, plus each
+Primary Dealer Statistical series discovered from the official
+/api/pd/list/timeseries.json metadata. The previous NY_ENDPOINT API template
+entries are purged during startup migration and no longer exposed.
 
-An all-FRED crawl may take a considerable number of source requests. The
-app must not claim completeness before its category queue is exhausted.
-A missing FRED_API_KEY prevents only FRED crawling, not public NY Fed use.
+Dataset -> fixed JSON endpoint -> daily analytical result:
 
-NY Fed Markets APIs provide several fundamentally different data structures:
-reference rates, individual primary-dealer statistical time series,
-operation-level records, and holdings/summary datasets. Not every GET
-endpoint returns a simple series; required path parameters and schemas
-must be validated for individual endpoints.
+- Agency Mortgage-Backed Securities operations:
+  ambs/all/results/summary/search.json. Fetch ALL operation types,
+  SUM accepted par amount per day/type; also provide an all-type total.
+- Central-bank liquidity swaps:
+  fxs/all/search.json. Use all operation types and normal date filters,
+  no dateType or counterparties filter. SUM by trade date and currency.
+  Currency charts are separate; never sum values across currencies.
+- Reference rates:
+  rates/all/search.json. Plot percentRate as lines and volumeInBillions as
+  bars on the opposite Y axis. Rates/volumes can be toggled via Plotly legend.
+- Repo and reverse repo operations:
+  rp/results/search.json. Expose three searchable products: both, Repo,
+  and Reverse Repo. The latter two send operationTypes=Repo or
+  operationTypes=Reverse%20Repo; always filter the actual returned
+  operationType client-side because API filtering can be unreliable.
+  For each day, sum totalAmtAccepted separately per operation type.
+  For a single-type view, also compute security class amounts from each
+  operation's details[].amtAccepted when they reconcile with the operation
+  totalAmtAccepted (do NOT attribute a whole multi-class operation to each
+  security class).
+- Treasury securities operations:
+  tsy/all/results/summary/search.json. Fetch all, summary, JSON. Sum
+  totalParAmtAccepted per operation date, split P (Purchases) and S (Sales).
+- Primary Dealer Statistics: retrieve the latest published keyid list and
+  human-readable descriptions, then query /api/pd/get/{keyid}.json for
+  historical observations. Seriesbreak metadata does not constrain the
+  historical start date.
 
-References:
-https://fred.stlouisfed.org/docs/api/fred/category_series.html
-https://fred.stlouisfed.org/docs/api/fred/series_search.html
-https://markets.newyorkfed.org/static/docs/markets-api.html
+Guide Sheets, Primary Dealer Market Share, Securities Lending and SOMA
+Holdings were excluded as requested.
 
-## Analyst operations and data tables
+Operational charts keep underlying wide publisher records below daily
+aggregates, with CSV export. Legend entries toggle individual curves
+(including AMBS all-type total and Repo security-type components).
 
-Repo results are usually a repo.operations[] collection. Individual rows
-include operationDate, operationType, totalAmtAccepted and
-totalAmtSubmitted. Those amounts are USD (e.g. 200000000 = $200 million),
-NOT values in millions of dollars.
+Publisher series discovery is only metadata: newly found series observations
+are loaded on demand and are not inserted automatically into the original
+18-series scheduled Databricks Bronze/Silver/Gold pipeline.
 
-The operation chart sums ADDITIVE monetary amounts by operation date and
-operation type, preserving separate Repo and Reverse Repo series. Missing
-amounts fail validation. Rates and prices are not summed. The full original
-publisher-record table appears below the daily aggregate chart and can be
-exported separately as CSV.
+## Files
 
-Primary Dealer statistical keyids, by contrast, are already individual
-series with their own observation frequencies. They are retrieved and
-displayed without adding together unrelated series.
+- live/catalog_index.py: SQLite FRED releases/series and NY Fed catalog
+- live/nyfed_datasets.py: data-product definitions and API transformations
+- live/studio.py: source tabs, interactive charts and underlying rows
+- live/providers.py: FRED observations and primary-dealer stat series
+- tests/test_catalog_index.py: release paging, resumption and search
+- tests/test_nyfed_datasets.py: aggregation, currency, rates, security breakdown
+- scripts/probe_research_datasets.py: advisory external API integration checks
 
-More complex NY Fed API families remain available via explicitly mapped
-publisher endpoint templates; this does not imply schema validation for
-every individual NY Fed endpoint.
+Live schema probing has verified AMBS under ambs.auctions, swaps under
+fxSwaps.operations, Treasury under treasury.auctions, repo under
+repo.operations with nested details[].securityType/amtAccepted, and
+reference rates under refRates.
 
-## Testing
-
-Tests cover local catalog search, FRED tree pagination/checkpoints, NY Fed
-metadata, daily operation-type sums, unaggregated detail retention,
-input validation and the existing chart and analytical functionality.
-Headless UI tests disable startup network warming via
-ANALYST_DISABLE_CATALOG_WARM=1.
-
-Live FRED full-catalog crawling cannot be validated without an actual
-server-side key and network-enabled environment.
+Production caveats: this code is not a commercial SaaS deployment. FRED
+metadata may be incomplete until the crawler finishes. Operations with
+missing accepted amounts are preserved in raw rows but excluded from
+daily sums, with a warning. Dates are observation/trade dates, not
+audited release timestamps.

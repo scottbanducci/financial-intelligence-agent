@@ -1,83 +1,43 @@
-# Liquidity Intelligence · Financial Data Studio
+# Financial Intelligence Agent — experimental analyst workbench
 
-An experimental analyst-first financial research platform with **live on-demand
-US financial data, deterministic computation, professional chart exports,
-an extensible data-provider interface and bounded LLM/ML workflows.**
+Multi-source financial charting and deterministic research tools on
+Databricks and Streamlit.
 
-[Browse experimental branch](https://github.com/scottbanducci/financial-intelligence-agent/tree/experiment/market-liquidity-launch)
-· [Draft PR #2](https://github.com/scottbanducci/financial-intelligence-agent/pull/2)
-· [Commercial readiness audit](financial_intelligence_agent/docs/commercial_readiness.md)
-· [Live deployment runbook](financial_intelligence_agent/docs/deploy_live.md)
-
-## Functional overview
-
-**Live Data Studio** — Search FRED's catalog with a user/server key, fetch
-NY Fed money-market rates, published primary-dealer aggregates and bounded additional Markets API endpoint mappings (including repo operations),
-query FDIC banking statistics, derive bank-level credit contraction breadth,
-load your Databricks Gold H.4.1/H.8/rates tables with read-only permissions
-or import FFIEC tabular bulk data and arbitrary CSV.
-
-**Charts** — Compare up to 12 series with unit validation; create line, bar,
-area or scatter charts; index dissimilar units; edit titles, dates and
-subtitles. Download **CSV, high-resolution PNG, scalable SVG, provenance JSON,
-reproducible research ZIP and saved chart recipes**.
-
-**Analysis** — 48 registered deterministic time-series operators, explicit
-resampling and unit conversion, 24 registered classical ML approaches with
-walk-forward tests and baseline metrics, LLM-selectable bounded operator
-plans and standalone macro tools. Threshold alerts can be evaluated and
-exported; scheduled delivery is not deployed.
-
-**Reproducibility** — SHA-256 fingerprinted source data, portable audited
-workspaces, immutable snapshot publishing primitives, research ZIPs and
-source/measurement caveats.
-
-## Start locally
+## Run
 
 From financial_intelligence_agent:
 
     python -m pip install -r requirements.txt
-    streamlit run app.py
+    python -m streamlit run app.py
 
-Without credentials, the live NY Fed/FDIC public sources should be available
-when their endpoints are reachable. FRED requires FRED_API_KEY in server env,
-or analysts can provide their own key in the studio. Databricks Gold requires
-configured DATABRICKS_HTTP_PATH, DATABRICKS_CATALOG and workspace auth.
+For FRED, copy .env.example to a local untracked .env and supply
+FRED_API_KEY or set that key in the server environment.
 
-Docker:
+## Data acquisition in Live Data Studio
 
-    docker build -t liquidity-intelligence .
-    docker run --rm -p 8000:8000 liquidity-intelligence
+**FRED tab:** Searches a locally indexed release/series catalog. At
+startup, the application enumerates FRED releases and pages through
+each release's member series (not through categories). Indexing is
+resumable and progressive; the UI reports whether it is complete.
 
-## Verification and limitations
+**NY Fed tab:** Searches analyst datasets rather than arbitrary endpoints:
+Agency MBS operations, central-bank liquidity swaps, reference rates
+and volumes, repo/reverse repo (combined and separately), Treasury
+purchases/sales and all indexed Primary Dealer Statistical series.
+Operations chart daily additive amounts split by operation type or
+currency, with original records and CSV downloads shown underneath.
+Reference rates show rate line(s) and volume bars with a second axis.
+Plotly legends toggle individual traces.
 
-GitHub Actions runs source/ML/UI/export unit and contract tests, seven
-headless Streamlit workspace renders, Docker image build and advisory live
-source probes. The NY Fed sample probes verified 1,539 dealer metadata
-entries and 51 actual Treasury-dealer observations; these do not guarantee
-every identifier has valid recent observations.
+**Other tabs:** FDIC bank-level financials, bank contraction breadth,
+read-only Databricks Gold, and manually uploaded FFIEC/CSV files.
 
-**This is not a deployed, sellable production SaaS yet.** Missing verified
-public URL/uptime, tenant-scoped SSO and storage, subscriptions, provider
-redistribution licenses, comprehensive point-in-time vintages and deployed
-scheduled snapshot refresh. The historical Command Center tutorial is
-still pinned to its October 2026 fixture; the Live Data Studio must be used
-for on-demand current data.
+The analytical library includes 48 deterministic operators, 24 ML
+algorithm registrations, LLM-bounded analytical planning, chart PNG/SVG,
+CSV and research-bundle exports.
 
-Existing Databricks jobs/pipelines and the GitHub main branch are untouched.
+[Detailed source mapping and indexing](financial_intelligence_agent/docs/source_index_and_operations.md)
+[Deployment instructions](financial_intelligence_agent/docs/deploy_live.md)
 
-
-## New publisher index and server-side FRED configuration
-
-Copy financial_intelligence_agent/.env.example to an untracked .env in the
-same directory; set FRED_API_KEY there or in a server secret manager.
-The app does not display a FRED key field or Curated Publisher series menu.
-
-At startup it seeds a local searchable SQLite database, then incrementally
-fetches NY Fed keyid and OpenAPI endpoint metadata and the entire paginated
-FRED category/series tree (when a key exists). Searches use the local index
-and are fast; the initial exhaustive FRED crawl is NOT instantaneous.
-Operations are charted as daily per-type dollar sums with underlying detail
-below, while individual Primary Dealer statistics are charted as time series.
-
-Details: financial_intelligence_agent/docs/source_index_and_operations.md
+This is an experimental branch, not yet a deployed and validated paid
+multi-user SaaS. The original 18-series FRED ingestion job is unchanged.

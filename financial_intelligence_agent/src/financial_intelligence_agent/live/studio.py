@@ -630,19 +630,6 @@ def _chart_builder():
         st.info("Fetch or import one or more series to unlock chart building and exports.")
         return
     st.markdown("### Chart designer")
-    with st.expander("Validate an existing chart recipe"):
-        uploaded_recipe=st.file_uploader("Select a saved chart recipe (.json)",
-                                        type=["json"],key="saved_chart_recipe")
-        if uploaded_recipe is not None and st.button("Check recipe against current workspace"):
-            try:
-                restored,layout=load_chart_recipe(uploaded_recipe.getvalue(),
-                    {k:v["series"] for k,v in ws.items()})
-                st.success("Verified source fingerprints and chart schema")
-                st.json({"title":layout.title,"mode":layout.mode,"style":layout.style,
-                         "series":list(restored)})
-                st.caption("Apply these documented selections below. Chart recipes are intentionally inert JSON.")
-            except Exception as exc:
-                st.error("Chart recipe unavailable: "+str(exc))
     selected=st.multiselect("Datasets",list(ws),default=list(ws)[:min(2,len(ws))],
                             max_selections=12,key="plot_selection")
     if not selected:return
@@ -672,6 +659,19 @@ def _chart_builder():
                        " · "+entry["warning"])
         st.dataframe(frame.tail(40),use_container_width=True)
         _publication_buttons(frame,spec,unit,chosen,warnings,prefix="custom-chart")
+        with st.expander("Validate an existing chart recipe"):
+            uploaded_recipe=st.file_uploader("Select a saved chart recipe (.json)",
+                                            type=["json"],key="saved_chart_recipe")
+            if uploaded_recipe is not None and st.button("Check recipe against current workspace"):
+                try:
+                    restored,layout=load_chart_recipe(uploaded_recipe.getvalue(),
+                        {k:v["series"] for k,v in ws.items()})
+                    st.success("Verified source fingerprints and chart schema")
+                    st.json({"title":layout.title,"mode":layout.mode,"style":layout.style,
+                             "series":list(restored)})
+                    st.caption("Apply these documented selections above. Chart recipes are inert JSON.")
+                except Exception as exc:
+                    st.error("Chart recipe unavailable: "+str(exc))
     except Exception as exc:
         st.error("Chart validation: "+str(exc))
 

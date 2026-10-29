@@ -119,6 +119,35 @@ def interactive_chart(data:pd.DataFrame,spec:ChartSpec,unit:str):
     return fig
 
 
+def preview_figure(series:Series,label:str):
+    """Source preview with an explicit nonzero-anchored, data-sensitive Y range.
+
+    Use the visible data interval, not the full source history. A small
+    fraction of span pads min/max; a flat or nearly flat series receives
+    a small symmetric range. Never imply a zero baseline for a line.
+    """
+    import plotly.graph_objects as go
+    points=series.select().points
+    dates=[p.date for p in points if p.value is not None]
+    values=[float(p.value) for p in points if p.value is not None]
+    if not values:
+        raise ValueError("No numeric observations to preview")
+    low,high=min(values),max(values)
+    span=high-low
+    # A constant series still needs a readable axis. For ordinary series
+    # the axis should not extend all the way down to zero by default.
+    padding=max(span*0.06,abs(high)*0.0005,abs(low)*0.0005,1e-9)
+    fig=go.Figure(go.Scatter(x=dates,y=values,name=label,mode="lines",
+                             connectgaps=False))
+    fig.update_layout(
+        template="plotly_dark",height=390,
+        title=label,xaxis_title="Observation date",yaxis_title=series.unit,
+        yaxis=dict(range=[low-padding,high+padding],rangemode="normal",
+                   showgrid=True,zeroline=False),
+        hovermode="x unified",margin={"l":65,"r":25,"t":65,"b":60})
+    return fig
+
+
 def image_bytes(data:pd.DataFrame,spec:ChartSpec,unit:str,format:str="png")->bytes:
     if format not in {"png","svg"}:raise ValueError("Supported exports: png, svg")
     import matplotlib

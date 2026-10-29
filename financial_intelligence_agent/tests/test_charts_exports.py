@@ -29,6 +29,25 @@ class Charts(unittest.TestCase):
         self.assertIn(b"2026-10-04",exported)
         self.assertIn(b"fingerprint",metadata_bytes({"SOFR":self.a},spec,unit,warnings))
         self.assertEqual(len(interactive_chart(df,spec,unit).data),2)
+    def test_preview_axis_tracks_data_not_zero(self):
+        from financial_intelligence_agent.live.charts import preview_figure
+        from financial_intelligence_agent.engine.operators import Series,Point
+        from datetime import date
+        s=Series("closerange","FRED","percent","daily",(
+            Point(date(2026,10,1),4.80),
+            Point(date(2026,10,2),4.84),
+            Point(date(2026,10,3),4.83)))
+        fig=preview_figure(s,"Test rate")
+        low,high=fig.layout.yaxis.range
+        self.assertGreater(low,4.7)
+        self.assertLess(high,4.9)
+        flat=Series("flat","FRED","percent","daily",(
+            Point(date(2026,10,1),4.80),
+            Point(date(2026,10,2),4.80)))
+        a,b=preview_figure(flat,"Flat rate").layout.yaxis.range
+        self.assertLess(a,4.8)
+        self.assertGreater(b,4.8)
+
     def test_publication_bundle_and_recipe(self):
         from zipfile import ZipFile
         from io import BytesIO

@@ -17,7 +17,7 @@ import streamlit as st
 from financial_intelligence_agent.live.catalog_index import get_connection,search as catalog_search,status as catalog_status,release_list
 from financial_intelligence_agent.live.long_labels import render_fred_metadata,render_dataset_table
 from financial_intelligence_agent.live.nyfed_datasets import fetch_dataset,BY_ID
-from financial_intelligence_agent.live.chart_controls import window_controls
+from financial_intelligence_agent.live.chart_controls import window_controls,period_controls
 from financial_intelligence_agent.live.date_ranges import Coverage,extend
 from financial_intelligence_agent.live.panels import fetch_bank_panel,contraction_breadth
 from financial_intelligence_agent.live.databricks_gold import read_gold,descriptors as gold_descriptors
@@ -226,14 +226,10 @@ def _load_fred():
     with st.expander("Metadata for indexed series"):
         render_fred_metadata(matches[:75])
     earliest=date(1776,1,1)
-    has_chart=(st.session_state.get("fred_last_result")==chosen["id"]
-               and chosen["id"] in _state()
-               and any(p.date>=st.session_state.get("fred_range_start",date.min)
-                       and p.date<=st.session_state.get("fred_range_end",date.max)
-                       for p in _state()[chosen["id"]]["series"].points))
+    has_loaded=(st.session_state.get("fred_last_result")==chosen["id"]
+                and chosen["id"] in _state())
     start,end=window_controls("fred_range",earliest=earliest,
-                              all_start=lambda:_fred_first_date(chosen["id"]),
-                              show_controls=has_chart)
+                              show_controls=has_loaded)
     if st.button("Load FRED observations",type="primary",key="fred_load_observations"):
         try:
             with st.spinner("Loading FRED data; using the private server API key"):
@@ -274,6 +270,8 @@ def _load_fred():
                             for p in series.points]).set_index("date")
         label=_state()[recent]["descriptor"].label
         st.caption("Displaying "+label+" · "+recent)
+        period_controls("fred_range",earliest=earliest,
+                        all_start=lambda:_fred_first_date(chosen["id"]))
         fig=preview_figure(series,label)
         st.plotly_chart(fig,use_container_width=True,theme=None,
             key="fred_preview",config={"toImageButtonOptions":{
@@ -367,21 +365,8 @@ def _load_nyfed():
     # records can be sourced separately where published by the issuer.
     ny_first=date(1986,1,1) if choice["provider"]=="NYFED_PD" else date(2000,1,1)
     loaded_before=st.session_state.get("nyfed_loaded") or {}
-    loaded_chart=loaded_before.get("id")==choice["id"]
-    if loaded_chart and loaded_before.get("kind")=="dealer":
-        item=_state().get(choice["id"])
-        loaded_chart=bool(item and any(
-            st.session_state.get("nyfed_range_start",date.min)<=p.date<=
-            st.session_state.get("nyfed_range_end",date.max)
-            for p in item["series"].points))
-    elif loaded_chart:
-        previous=loaded_before.get("result")
-        loaded_chart=bool(previous and any(
-            st.session_state.get("nyfed_range_start",date.min)<=p.date<=
-            st.session_state.get("nyfed_range_end",date.max)
-            for series in previous.series.values() for p in series.points))
     start,end=window_controls("nyfed_range",earliest=ny_first,
-                              show_controls=loaded_chart)
+                              show_controls=loaded_before.get("id")==choice["id"])
     if st.button("Load NY Fed dataset",key="nyfed_fetch_dataset",type="primary"):
         try:
             if choice["provider"]=="NYFED_PD":
@@ -448,6 +433,7 @@ def _load_nyfed():
         if not series.points:
             st.info("No dealer observations in this period.");return
         frame=pd.DataFrame([{"Date":p.date,"Value":float(p.value)} for p in series.points])
+        period_controls("nyfed_range",earliest=ny_first)
         st.plotly_chart(preview_figure(series,item["descriptor"].label),
                         use_container_width=True,theme=None,key="nydealer_preview")
         st.dataframe(frame.tail(250),use_container_width=True,hide_index=True)
@@ -481,6 +467,7 @@ def _load_nyfed():
     if not result.series:
         st.info("No observations in the selected chart window.");return
     st.caption("Publisher source: "+result.source_url)
+    period_controls("nyfed_range",earliest=ny_first)
     _show_ny_chart(result)
     for note in result.warnings:st.caption(note)
     st.subheader("Daily chart observations")
@@ -697,13 +684,14 @@ def _operators():
     if latest in ws:
         series=ws[latest]["series"]
         st.markdown("#### Most recent result")
-        a,b=window_controls("latest_result_range",
-                            earliest=min(p.date for p in series.points))
+        result_first=min(p.date for p in series.points)
+        a,b=window_controls("latest_result_range",earliest=result_first)
         series=_clip_series(series,a,b)
         if not series.points:
             st.info("No calculated observations in the selected chart range.")
             return
         try:
+            period_controls("latest_result_range",earliest=result_first)
             st.plotly_chart(preview_figure(series,latest),use_container_width=True,
                             theme=None,key="transform_result_preview")
             frame=pd.DataFrame([{"Date":p.date,"Value":float(p.value) if p.value is not None else None}
@@ -841,6 +829,7 @@ def _chart_builder():
     try:
         frame,unit,warnings=prepare(chosen,spec)
         fig=interactive_chart(frame,spec,unit)
+        period_controls("plot_range",earliest=oldest)
         st.plotly_chart(fig,use_container_width=True,theme=None)
         st.caption("Y axis: "+unit+" · "+str(len(frame))+" dated rows · "+
                    " · ".join(warnings[:5]))

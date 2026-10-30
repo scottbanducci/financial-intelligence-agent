@@ -317,12 +317,11 @@ _VISIBLE_Y_AUTOSCALE = r"""
 def install_dataset_label_scrolling() -> None:
     """Install the single app-wide CSS and static delegated hover handler."""
     st.html(_SCROLL_STYLE)
-    # Streamlit executes only the first script element, and bundling two
-    # top-level IIFEs was also suppressed by its HTML processing. Install
-    # both event listeners inside ONE IIFE and ONE script element.
-    y_body=_VISIBLE_Y_AUTOSCALE.split("(() => {",1)[1].rsplit("})();",1)[0]
-    combined=_SCROLL_SCRIPT.replace("})();\n</script>",y_body+"\n})();\n</script>")
-    st.html(combined,unsafe_allow_javascript=True)
+    # The native Streamlit Plotly chart does not expose relayout events to
+    # Python, and attempting to intercept its toolbar prevented the existing
+    # dropdown handler from installing. Preserve the working label handler.
+    # Y axes still fit each visible date preset on the server.
+    st.html(_SCROLL_SCRIPT,unsafe_allow_javascript=True)
 
 
 def install_fred_label_scrolling() -> None:

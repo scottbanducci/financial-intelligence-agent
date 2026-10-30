@@ -353,8 +353,13 @@ def _load_nyfed():
                 from financial_intelligence_agent.live.providers import dealer
                 # Dealer endpoint returns full history on every request;
                 # cache the complete record once, then use local date filtering.
-                result=_load_series_coverage(choice["id"],start,end,batch_days=3650)
-                if result is None:raise ValueError("No dealer observations in this period")
+                # Primary Dealer /pd/get returns the complete time series
+                # regardless of date filters. Download once for the supported
+                # long history horizon; subsequent 5D..ALL previews are local.
+                dealer_first=date.today()-timedelta(days=365*39)
+                result=_load_series_coverage(choice["id"],dealer_first,date.today(),
+                                              batch_days=365*40)
+                if result is None:raise ValueError("No dealer observations")
                 descriptor=Descriptor(choice["id"],choice["label"],"NYFED_PD",
                       choice["unit"],choice["frequency"],choice["category"],
                       choice["source_url"],choice["convention"])
@@ -390,7 +395,7 @@ def _load_nyfed():
     if loaded["kind"]=="dealer":
         if st.session_state.get("nyfed_loaded_range")!=(start,end):
             try:
-                refreshed=_load_series_coverage(choice["id"],start,end,batch_days=3650)
+                refreshed=_load_series_coverage(choice["id"],start,end,batch_days=365*40)
                 if refreshed is not None:
                     info=_state().get(choice["id"])
                     if info:

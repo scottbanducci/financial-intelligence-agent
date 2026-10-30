@@ -255,18 +255,31 @@ _VISIBLE_Y_AUTOSCALE = r"""
     if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
     const lower = Math.min(a,b), upper = Math.max(a,b);
     const byAxis = new Map();
-    for (const trace of gd.data || []) {
+    for (let traceNumber=0; traceNumber<(gd.data||[]).length; traceNumber++) {
+      const trace=gd.data[traceNumber];
       if (trace.visible === false || trace.visible === "legendonly") continue;
-      const xs=trace.x, ys=trace.y;
-      if (!xs || !ys) continue;
       const name = (trace.yaxis && /^y[2-9][0-9]*$/.test(trace.yaxis))
         ? "yaxis" + trace.yaxis.slice(1) : "yaxis";
       const current = byAxis.get(name) || [];
-      for (let i=0; i<Math.min(xs.length,ys.length); i++) {
-        const x=time(xs[i]), y=Number(ys[i]);
-        if (Number.isFinite(x) && x>=lower && x<=upper &&
-            ys[i] !== null && ys[i] !== "" && Number.isFinite(y)) {
-          current.push(y);
+      // Streamlit transmits numerical Plotly values as base64-encoded
+      // typed arrays. Plotly's internal calcdata already decodes them
+      // and converts date axes to millisecond timestamps.
+      const calc=gd.calcdata?.[traceNumber] || [];
+      if (calc.length) {
+        for (const point of calc) {
+          const x=time(point.x), y=Number(point.y);
+          if (Number.isFinite(x) && x>=lower && x<=upper &&
+              point.y !== null && point.y !== "" && Number.isFinite(y)) {
+            current.push(y);
+          }
+        }
+      } else if (Array.isArray(trace.x) && Array.isArray(trace.y)) {
+        for (let i=0;i<Math.min(trace.x.length,trace.y.length);i++) {
+          const x=time(trace.x[i]), y=Number(trace.y[i]);
+          if (Number.isFinite(x) && x>=lower && x<=upper &&
+              trace.y[i] !== null && trace.y[i] !== "" && Number.isFinite(y)) {
+            current.push(y);
+          }
         }
       }
       if (current.length) byAxis.set(name,current);
@@ -274,7 +287,11 @@ _VISIBLE_Y_AUTOSCALE = r"""
     if (!byAxis.size) return null;
     const updates={};
     for (const [axis,values] of byAxis.entries()) {
-      const min=Math.min(...values),max=Math.max(...values);
+      let min=Infinity,max=-Infinity;
+      for (const value of values) {
+        min=Math.min(min,value);
+        max=Math.max(max,value);
+      }
       const pad=Math.max((max-min)*0.06,Math.abs(min)*0.0005,
                          Math.abs(max)*0.0005,1e-9);
       updates[axis+".range"]=[min-pad,max+pad];

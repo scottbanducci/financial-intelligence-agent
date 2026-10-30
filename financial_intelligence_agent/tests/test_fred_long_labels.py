@@ -83,6 +83,7 @@ class FredLongLabelsTests(unittest.TestCase):
         self.assertIn('data-title="Autoscale"',_VISIBLE_Y_AUTOSCALE)
         self.assertIn("event.stopImmediatePropagation()",_VISIBLE_Y_AUTOSCALE)
         self.assertIn("Plotly.relayout(gd,changes)",_VISIBLE_Y_AUTOSCALE)
+        self.assertIn("gd.calcdata",_VISIBLE_Y_AUTOSCALE)
         self.assertIn("xaxis",_VISIBLE_Y_AUTOSCALE)
         self.assertIn('yaxis',_VISIBLE_Y_AUTOSCALE)
 

@@ -199,8 +199,8 @@ def _load_fred():
     selected_release=st.selectbox("Browse by release",options,
         format_func=lambda r:"All releases" if r is None else f'{r["name"]} ({r["series"]} indexed)',
         key="fred_release_selected")
-    query=st.text_input("Search FRED series by name, identifier, frequency, units or release",
-        placeholder="e.g. reserve total weekly, millions USD, H.4.1",
+    query=st.text_input("Search FRED series by name, identifier, frequency or units",
+        placeholder="e.g. reserve total weekly, millions USD, SOFR",
         key="fred_series_search")
 
     include_discontinued=st.session_state.get("fred_include_discontinued",False)

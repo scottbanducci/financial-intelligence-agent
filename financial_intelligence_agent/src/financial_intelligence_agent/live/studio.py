@@ -92,11 +92,21 @@ def _merge_ny_result(old,new):
         series[name]=_merge_series(series.get(name),val)
     for name,val in new.volume.items():
         volume[name]=_merge_series(volume.get(name),val)
+    # Operation groups (e.g. Coupon Swap) are sparse across date batches.
+    # Keep each merged series' unit even when the most recent batch lacks
+    # that group; otherwise the UI fails at result.units[name].
+    units=dict(old.units)
+    for name,unit in new.units.items():
+        if name in units and units[name]!=unit:
+            raise ValueError(f"NY Fed series unit changed across batches: {name}")
+        units[name]=unit
+    if any(name not in units for name in (*series,*volume)):
+        raise ValueError("NY Fed merged series is missing its unit metadata")
     daily={(r["observation_date"],r["series"]):r for r in old.daily}
     daily.update({(r["observation_date"],r["series"]):r for r in new.daily})
     # Publisher operation records may have no stable unique ID; coverage
     # batches do not overlap and therefore preserve source rows verbatim.
-    return replace(new,series=series,volume=volume,
+    return replace(new,series=series,volume=volume,units=units,
                    daily=tuple(daily[k] for k in sorted(daily)),
                    detail=old.detail+new.detail,
                    warnings=tuple(dict.fromkeys(old.warnings+new.warnings)))

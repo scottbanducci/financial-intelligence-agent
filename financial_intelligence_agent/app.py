@@ -57,6 +57,13 @@ h1,h2,h3{letter-spacing:-.04em}h1{font-weight:750!important}
 div[data-testid="stMetric"]{background:linear-gradient(150deg,#17283d,#112134);border:1px solid #30475a;border-radius:12px;padding:18px}
 [data-testid="stMetricValue"]{font-variant-numeric:tabular-nums}
 div.stButton>button[kind=primary]{background:#168f88;color:#fff;border-color:#2cccc0}
+/* Compact, right-justified FRED series filter alongside its heading. */
+.fred-series-label{font-size:.875rem;font-weight:600;line-height:2.25rem}
+.st-key-fred_include_discontinued{display:flex;justify-content:flex-end}
+.st-key-fred_include_discontinued label p{font-size:.76rem!important;white-space:nowrap}
+/* Chart-period preset buttons use a borderless, understated toolbar. */
+div[data-testid="stSegmentedControl"] button{border:0!important;box-shadow:none!important}
+div[data-testid="stSegmentedControl"] button:focus-visible{outline:2px solid #2cccc0;outline-offset:2px}
 </style>""",unsafe_allow_html=True)
 
 # One global handler for all tabs/workspaces and dynamically mounted dropdowns.

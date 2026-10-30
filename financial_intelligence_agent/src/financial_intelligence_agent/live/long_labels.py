@@ -317,11 +317,12 @@ _VISIBLE_Y_AUTOSCALE = r"""
 def install_dataset_label_scrolling() -> None:
     """Install the single app-wide CSS and static delegated hover handler."""
     st.html(_SCROLL_STYLE)
-    # Keep the two executable scripts in separate Streamlit HTML elements.
-    # Concatenating independent scripts into one HTML string prevented both
-    # listeners from installing in Chromium.
-    st.html(_SCROLL_SCRIPT,unsafe_allow_javascript=True)
-    st.html(_VISIBLE_Y_AUTOSCALE,unsafe_allow_javascript=True)
+    # Streamlit executes only the first script element, and bundling two
+    # top-level IIFEs was also suppressed by its HTML processing. Install
+    # both event listeners inside ONE IIFE and ONE script element.
+    y_body=_VISIBLE_Y_AUTOSCALE.split("(() => {",1)[1].rsplit("})();",1)[0]
+    combined=_SCROLL_SCRIPT.replace("})();\n</script>",y_body+"\n})();\n</script>")
+    st.html(combined,unsafe_allow_javascript=True)
 
 
 def install_fred_label_scrolling() -> None:

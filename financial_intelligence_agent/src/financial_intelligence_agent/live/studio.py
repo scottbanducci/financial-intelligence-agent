@@ -227,7 +227,10 @@ def _load_fred():
         render_fred_metadata(matches[:75])
     earliest=date(1776,1,1)
     has_chart=(st.session_state.get("fred_last_result")==chosen["id"]
-               and chosen["id"] in _state())
+               and chosen["id"] in _state()
+               and any(p.date>=st.session_state.get("fred_range_start",date.min)
+                       and p.date<=st.session_state.get("fred_range_end",date.max)
+                       for p in _state()[chosen["id"]]["series"].points))
     start,end=window_controls("fred_range",earliest=earliest,
                               all_start=lambda:_fred_first_date(chosen["id"]),
                               show_controls=has_chart)
@@ -364,8 +367,21 @@ def _load_nyfed():
     # records can be sourced separately where published by the issuer.
     ny_first=date(1986,1,1) if choice["provider"]=="NYFED_PD" else date(2000,1,1)
     loaded_before=st.session_state.get("nyfed_loaded") or {}
+    loaded_chart=loaded_before.get("id")==choice["id"]
+    if loaded_chart and loaded_before.get("kind")=="dealer":
+        item=_state().get(choice["id"])
+        loaded_chart=bool(item and any(
+            st.session_state.get("nyfed_range_start",date.min)<=p.date<=
+            st.session_state.get("nyfed_range_end",date.max)
+            for p in item["series"].points))
+    elif loaded_chart:
+        previous=loaded_before.get("result")
+        loaded_chart=bool(previous and any(
+            st.session_state.get("nyfed_range_start",date.min)<=p.date<=
+            st.session_state.get("nyfed_range_end",date.max)
+            for series in previous.series.values() for p in series.points))
     start,end=window_controls("nyfed_range",earliest=ny_first,
-                              show_controls=loaded_before.get("id")==choice["id"])
+                              show_controls=loaded_chart)
     if st.button("Load NY Fed dataset",key="nyfed_fetch_dataset",type="primary"):
         try:
             if choice["provider"]=="NYFED_PD":

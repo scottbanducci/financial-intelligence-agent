@@ -248,7 +248,7 @@ def _load_nyfed():
         st.info("No matching data product. Check spelling or wait for primary-dealer metadata to finish.")
         return
     choice=st.selectbox("Dataset to chart",matches,
-        format_func=lambda x:f'{x["label"]} · {x["provider"]} [{x["id"]}]'[:220],
+        format_func=lambda x:f'{x["label"]} · {x["provider"]} [{x["id"]}]',
         key="nyfed_selected_dataset")
     a,b=st.columns(2)
     start=a.date_input("From",date.today()-timedelta(days=365),key="nyfed_range_start")

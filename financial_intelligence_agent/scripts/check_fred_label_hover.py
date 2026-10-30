@@ -114,11 +114,11 @@ def main():
                 nysearch.fill("LONG_PD")
                 nysearch.press("Enter")
                 field=page.locator('[data-testid="stSelectbox"]').filter(
-                    has=page.get_by_text("Dataset to chart",exact=True))
+                    has=page.get_by_text("Dataset",exact=True))
                 field.locator("input").wait_for(timeout=20000)
                 page.wait_for_function("""() => Array.from(document.querySelectorAll(
                     '[data-testid="stSelectbox"]')).some(el =>
-                    el.textContent.includes("Dataset to chart") &&
+                    el.textContent.includes("Dataset") &&
                     (el.querySelector("input")?.value || "").includes("REALLYLONG"))""",
                     timeout=20000)
                 field.locator("input").click()

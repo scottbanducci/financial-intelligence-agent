@@ -1,0 +1,26 @@
+name: FRED long-label hover browser check
+on:
+  push:
+    branches: [experiment/market-liquidity-launch]
+  workflow_dispatch:
+jobs:
+  hover-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: financial_intelligence_agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: financial_intelligence_agent/requirements.txt
+      - name: Install app and Playwright
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install 'playwright>=1.55,<2'
+          python -m playwright install --with-deps chromium
+      - name: Verify real hover scrolling in browser
+        run: python scripts/check_fred_label_hover.py

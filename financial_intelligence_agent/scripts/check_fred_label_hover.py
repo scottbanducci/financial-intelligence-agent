@@ -193,6 +193,17 @@ def main():
                         'yaxis.range':[0,1100]
                     });
                 }""")
+                print("AUTOSCALE_DEBUG",gd.evaluate("""el => ({
+                    plotlyType:typeof window.Plotly,
+                    relayoutType:typeof window.Plotly?.relayout,
+                    graphX:el._fullLayout.xaxis.range.slice(),
+                    typeX:typeof el.data[0]?.x,
+                    lenX:el.data[0]?.x?.length,
+                    headX:el.data[0]?.x?.[0],
+                    headY:el.data[0]?.y?.[0],
+                    count:el.data.length,
+                    btn:!!el.querySelector('.modebar-btn[data-title="Autoscale"]')
+                })"""),flush=True)
                 before=gd.evaluate("el => ({x:el._fullLayout.xaxis.range.slice(), y:el._fullLayout.yaxis.range.slice()})")
                 autoscale=gd.locator('.modebar-btn[data-title="Autoscale"]')
                 autoscale.click(force=True)

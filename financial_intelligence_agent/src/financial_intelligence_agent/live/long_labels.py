@@ -229,10 +229,79 @@ _SCROLL_SCRIPT = r"""
 """
 
 
+
+# Plotly's default Autoscale resets both axes to the full data range.
+# For financial time series, users expect it to keep their horizontal zoom
+# and fit ONLY Y to the values actually visible. Streamlit's built-in chart
+# exposes window.Plotly.relayout, so no external JS or chart replacement is
+# needed. The handler is limited to charts with date-valued X coordinates.
+_VISIBLE_Y_AUTOSCALE = r"""
+<script>
+(() => {
+  if (window.__analystVisibleYAutoscaleInstalled) return;
+  window.__analystVisibleYAutoscaleInstalled = true;
+
+  function time(value) {
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === "number") return value > 1e11 ? value : NaN;
+    if (typeof value === "string") return Date.parse(value);
+    return NaN;
+  }
+  function visibleRanges(gd) {
+    if (!gd || typeof window.Plotly?.relayout !== "function") return null;
+    const range = gd._fullLayout?.xaxis?.range;
+    if (!range || range.length < 2) return null;
+    const a = time(range[0]), b = time(range[1]);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    const lower = Math.min(a,b), upper = Math.max(a,b);
+    const byAxis = new Map();
+    for (const trace of gd.data || []) {
+      if (trace.visible === false || trace.visible === "legendonly") continue;
+      const xs=trace.x, ys=trace.y;
+      if (!xs || !ys) continue;
+      const name = (trace.yaxis && /^y[2-9][0-9]*$/.test(trace.yaxis))
+        ? "yaxis" + trace.yaxis.slice(1) : "yaxis";
+      const current = byAxis.get(name) || [];
+      for (let i=0; i<Math.min(xs.length,ys.length); i++) {
+        const x=time(xs[i]), y=Number(ys[i]);
+        if (Number.isFinite(x) && x>=lower && x<=upper &&
+            ys[i] !== null && ys[i] !== "" && Number.isFinite(y)) {
+          current.push(y);
+        }
+      }
+      if (current.length) byAxis.set(name,current);
+    }
+    if (!byAxis.size) return null;
+    const updates={};
+    for (const [axis,values] of byAxis.entries()) {
+      const min=Math.min(...values),max=Math.max(...values);
+      const pad=Math.max((max-min)*0.06,Math.abs(min)*0.0005,
+                         Math.abs(max)*0.0005,1e-9);
+      updates[axis+".range"]=[min-pad,max+pad];
+      updates[axis+".autorange"]=false;
+    }
+    return updates;
+  }
+  document.addEventListener("click", event => {
+    const node=event.target instanceof Element ? event.target : null;
+    const button=node?.closest('.modebar-btn[data-title="Autoscale"]');
+    if (!button) return;
+    const gd=button.closest(".js-plotly-plot");
+    const changes=visibleRanges(gd);
+    if (!changes) return; // No dated points: let Plotly perform normal autoscale.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    window.Plotly.relayout(gd,changes);
+  }, true);
+})();
+</script>
+"""
+
 def install_dataset_label_scrolling() -> None:
     """Install the single app-wide CSS and static delegated hover handler."""
     st.html(_SCROLL_STYLE)
     st.html(_SCROLL_SCRIPT, unsafe_allow_javascript=True)
+    st.html(_VISIBLE_Y_AUTOSCALE, unsafe_allow_javascript=True)
 
 
 def install_fred_label_scrolling() -> None:

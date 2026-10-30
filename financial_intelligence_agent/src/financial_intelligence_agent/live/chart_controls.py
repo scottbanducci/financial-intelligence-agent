@@ -5,14 +5,24 @@ selecting a longer period can request additional publisher history on
 the server. They do not initiate API requests themselves.
 """
 from __future__ import annotations
-from datetime import date
+from datetime import date,datetime,timezone
+from zoneinfo import ZoneInfo
 import streamlit as st
 from .date_ranges import PRESETS,DEFAULT,preset_window
+
+def _browser_today()->date:
+    """Date in the analyst's browser timezone, not the cloud worker's UTC."""
+    try:
+        tz=st.context.timezone
+        if tz:return datetime.now(ZoneInfo(tz)).date()
+    except (AttributeError,ValueError,KeyError):
+        pass
+    return datetime.now(timezone.utc).date()
 
 def _select_preset(prefix:str,earliest:date)->None:
     selected=st.session_state[prefix+"_preset"]
     if selected is None:return
-    a,b=preset_window(selected,date.today(),earliest=earliest)
+    a,b=preset_window(selected,_browser_today(),earliest=earliest)
     st.session_state[prefix+"_start"]=a
     st.session_state[prefix+"_end"]=b
 
@@ -25,7 +35,7 @@ def window_controls(prefix:str,*,earliest:date,show_dates:bool=True)->tuple[date
     A date input sets Custom mode (none of the nine preset buttons remains
     selected). Streamlit callbacks update dates before widgets instantiate.
     """
-    today=date.today()
+    today=_browser_today()
     if prefix+"_start" not in st.session_state:
         a,b=preset_window(DEFAULT,today,earliest=earliest)
         st.session_state[prefix+"_start"]=a

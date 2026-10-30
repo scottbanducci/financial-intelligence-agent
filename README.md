@@ -57,3 +57,17 @@ CSV and research-bundle exports.
 
 This is an experimental branch, not yet a deployed and validated paid
 multi-user SaaS. The original 18-series FRED ingestion job is unchanged.
+
+
+## Dataset name visibility across the application
+
+All Streamlit option menus and selected dataset controls share a horizontal
+hover-scroll behavior for names that extend beyond the available width.
+The FRED series metadata, Data Catalog (including release and Gold lists),
+and the Data transformations working-dataset inventory use escaped HTML
+inventory tables with per-cell horizontal hover scrolling. Numeric observation
+spreadsheets remain native Streamlit dataframes so their analytical grid
+interactions and exports are preserved. This behavior is enabled centrally
+in `live/long_labels.py` from `app.py`; no independent per-tab setup is needed.
+A Chromium browser regression checks FRED and NY Fed selectors and the
+Data Catalog metadata table.

@@ -184,7 +184,8 @@ _SCROLL_SCRIPT = r"""
     pending = window.setTimeout(() => {
       pending = null;
       const started = performance.now();
-      const duration = Math.max(1700, overflow * 17);
+      // Cap very long labels so the entire value is revealed promptly.
+      const duration = Math.min(14000, Math.max(1700, overflow * 17));
       function step(timestamp) {
         if (!target.isConnected || active !== target) return;
         const progress = Math.min(1, (timestamp - started) / duration);

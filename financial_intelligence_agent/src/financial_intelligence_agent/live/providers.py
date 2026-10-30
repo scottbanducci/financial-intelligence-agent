@@ -173,6 +173,24 @@ def fred(key: str,start: str,end: str,*,api_key: str|None=None,
                        "Current FRED vintage; first release-time correctness is not established")
 
 
+def fred_history_start(key:str,*,api_key:str|None=None,
+                       fetch:Callable[...,dict]|None=None)->date:
+    """Fetch the publisher's actual first observation date only on ALL."""
+    if not KEY.fullmatch(key):raise ValueError("Invalid FRED series identifier")
+    secret=api_key if api_key is not None else os.getenv("FRED_API_KEY","")
+    if not re.fullmatch(r"[a-z0-9]{32}",secret):
+        raise ValueError("Server-side FRED_API_KEY must be configured")
+    uri="https://api.stlouisfed.org/fred/series?"+urlencode({
+        "series_id":key,"api_key":secret,"file_type":"json"})
+    payload=_get(uri,"api.stlouisfed.org",fetch)
+    records=payload.get("seriess")
+    if not isinstance(records,list) or len(records)!=1:
+        raise ValueError("Unexpected FRED series metadata response")
+    start=day(records[0].get("observation_start"))
+    if start is None:raise ValueError("FRED series has no valid observation_start metadata")
+    return start
+
+
 def ny_rate(rate: str,start: str,end: str,*,fetch: Callable[...,dict]|None=None)->FetchResult:
     rate=rate.upper()
     if rate not in NY_GROUP:raise ValueError("Unsupported NY Fed reference rate")

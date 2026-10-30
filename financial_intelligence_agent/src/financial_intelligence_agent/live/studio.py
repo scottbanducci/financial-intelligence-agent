@@ -22,7 +22,7 @@ from financial_intelligence_agent.live.date_ranges import Coverage,extend
 from financial_intelligence_agent.live.panels import fetch_bank_panel,contraction_breadth
 from financial_intelligence_agent.live.databricks_gold import read_gold,descriptors as gold_descriptors
 from financial_intelligence_agent.live.fdic import bank_financial,FIELDS
-from financial_intelligence_agent.live.providers import fetch_series,Descriptor
+from financial_intelligence_agent.live.providers import fetch_series,fred_history_start,Descriptor
 from financial_intelligence_agent.live.workspaces import export_workspace,import_workspace
 from financial_intelligence_agent.live.charts import (
     ChartSpec,prepare,interactive_chart,preview_figure,scale_y_to_visible,image_bytes,csv_bytes,metadata_bytes,MODES,STYLES,research_bundle_bytes,chart_recipe_bytes,load_chart_recipe)
@@ -35,6 +35,10 @@ from financial_intelligence_agent.agent.operator_planner import AnalyticalServic
 @st.cache_data(ttl=900,max_entries=80,show_spinner=False)
 def _cached_fetch(series_id:str,start:str,end:str):
     return fetch_series(series_id,start,end)
+
+@st.cache_data(ttl=7*86400,max_entries=500,show_spinner=False)
+def _fred_first_date(series_id:str)->date:
+    return fred_history_start(series_id[len("FRED:"):])
 
 def _state():
     if "analyst_workspace" not in st.session_state:
@@ -217,7 +221,8 @@ def _load_fred():
     with st.expander("Metadata for indexed series"):
         render_fred_metadata(matches[:75])
     earliest=date(1776,1,1)
-    start,end=window_controls("fred_range",earliest=earliest)
+    start,end=window_controls("fred_range",earliest=earliest,
+                              all_start=lambda:_fred_first_date(chosen["id"]))
     if st.button("Load FRED observations",type="primary",key="fred_load_observations"):
         try:
             with st.spinner("Loading FRED data; using the private server API key"):

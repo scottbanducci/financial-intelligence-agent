@@ -61,9 +61,27 @@ div.stButton>button[kind=primary]{background:#168f88;color:#fff;border-color:#2c
 .fred-series-label{font-size:.875rem;font-weight:600;line-height:2.25rem}
 .st-key-fred_include_discontinued{display:flex;justify-content:flex-end}
 .st-key-fred_include_discontinued label p{font-size:.76rem!important;white-space:nowrap}
-/* Chart-period preset buttons use a borderless, understated toolbar. */
-div[data-testid="stSegmentedControl"] button{border:0!important;box-shadow:none!important}
-div[data-testid="stSegmentedControl"] button:focus-visible{outline:2px solid #2cccc0;outline-offset:2px}
+/* Streamlit segmented controls use a BaseWeb button-group, not stSegmentedControl.
+   Scope the overrides to chart range presets to preserve other app buttons. */
+div[class*="st-key-"][class*="_range_preset"] [data-baseweb="button-group"]{
+    border:none!important;box-shadow:none!important;outline:none!important;
+    background:transparent!important;gap:4px;
+}
+div[class*="st-key-"][class*="_range_preset"] [data-baseweb="button-group"] button,
+div[class*="st-key-"][class*="_range_preset"] button[data-testid^="stBaseButton-segmented_control"]{
+    border:none!important;box-shadow:none!important;outline:none!important;
+    background:transparent!important;border-radius:5px!important;
+}
+div[class*="st-key-"][class*="_range_preset"] [data-baseweb="button-group"] button[kind="segmented_controlActive"],
+div[class*="st-key-"][class*="_range_preset"] button[data-testid="stBaseButton-segmented_controlActive"]{
+    background:rgba(22,143,136,.23)!important;color:#41ded0!important;
+}
+div[class*="st-key-"][class*="_range_preset"] [data-baseweb="button-group"] button:hover{
+    background:rgba(22,143,136,.13)!important;
+}
+div[class*="st-key-"][class*="_range_preset"] [data-baseweb="button-group"] button:focus-visible{
+    outline:2px solid #2cccc0!important;outline-offset:2px!important;
+}
 </style>""",unsafe_allow_html=True)
 
 # One global handler for all tabs/workspaces and dynamically mounted dropdowns.

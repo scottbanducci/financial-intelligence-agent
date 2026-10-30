@@ -317,10 +317,12 @@ _VISIBLE_Y_AUTOSCALE = r"""
 def install_dataset_label_scrolling() -> None:
     """Install the single app-wide CSS and static delegated hover handler."""
     st.html(_SCROLL_STYLE)
-    # Streamlit can deduplicate separate script-only st.html components.
-    # Inject both independent handlers in one HTML component.
-    st.html(_SCROLL_SCRIPT + "\n" + _VISIBLE_Y_AUTOSCALE,
-            unsafe_allow_javascript=True)
+    # One actual script element is required: Streamlit's HTML sanitizer
+    # executes the first script but not a second sibling <script> element.
+    # Compose two independent IIFEs inside the same script tag.
+    y_body=_VISIBLE_Y_AUTOSCALE.replace("<script>","").replace("</script>","")
+    combined=_SCROLL_SCRIPT.replace("</script>",y_body+"\n</script>")
+    st.html(combined,unsafe_allow_javascript=True)
 
 
 def install_fred_label_scrolling() -> None:

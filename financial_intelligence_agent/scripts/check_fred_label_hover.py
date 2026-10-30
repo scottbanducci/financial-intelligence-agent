@@ -154,7 +154,7 @@ def main():
                 uploader=page.locator('[data-testid="stFileUploader"] input[type="file"]').first
                 uploader.set_input_files({
                     "name":"local-fixture.csv","mimeType":"text/csv",
-                    "buffer":b"observation_date,value\\n2026-10-01,1.0\\n2026-10-02,1.2\\n"
+                    "buffer":b"observation_date,value\n2026-10-01,1.0\n2026-10-02,1.2\n"
                 })
                 key="REALLYLONGTRANSFORMDATASET_"+("X"*47)
                 series_key=page.get_by_role("textbox",name="Series key")

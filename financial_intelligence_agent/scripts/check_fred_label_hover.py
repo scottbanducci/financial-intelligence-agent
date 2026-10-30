@@ -141,9 +141,17 @@ def main():
                 catalog_cell=page.locator(".dataset-label-viewport").filter(
                     has_text="REALLYLONG").first
                 catalog_cell.wait_for(timeout=15000)
-                catalog_cell.hover()
-                page.wait_for_timeout(2500)
-                catdist=catalog_cell.evaluate("el => el.scrollLeft")
+                # The Data Catalog page can rerender after Enter. Hover once
+                # the search settles, and rehover if the Streamlit layout
+                # changed under the pointer during the initial animation.
+                page.wait_for_timeout(900)
+                catdist=0
+                for _ in range(3):
+                    catalog_cell.scroll_into_view_if_needed()
+                    catalog_cell.hover()
+                    page.wait_for_timeout(1250)
+                    catdist=catalog_cell.evaluate("el => el.scrollLeft")
+                    if catdist>15:break
                 assert catdist>15,f"Data Catalog metadata label did not scroll: {catdist}"
                 print("PASS: Data Catalog dataset labels hover-scroll",catdist)
                 # Exercise the shared event handler in Data transformations,

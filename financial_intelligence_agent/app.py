@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 load_dotenv(ROOT / ".env",override=False)
 sys.path.insert(0,str(ROOT/"src"))
 from financial_intelligence_agent.live.catalog_index import bootstrap as bootstrap_catalog
+from financial_intelligence_agent.live.long_labels import install_dataset_label_scrolling,render_dataset_table
 from financial_intelligence_agent.agent.dispatcher import Engine,TOOLS
 from financial_intelligence_agent.data.csv_rates import CsvRatesReader
 from financial_intelligence_agent.tools.snapshot_insights import MacroSnapshot,FROZEN_CUTOFF
@@ -56,6 +57,9 @@ div[data-testid="stMetric"]{background:linear-gradient(150deg,#17283d,#112134);b
 [data-testid="stMetricValue"]{font-variant-numeric:tabular-nums}
 div.stButton>button[kind=primary]{background:#168f88;color:#fff;border-color:#2cccc0}
 </style>""",unsafe_allow_html=True)
+
+# One global handler for all tabs/workspaces and dynamically mounted dropdowns.
+install_dataset_label_scrolling()
 
 @st.cache_resource
 def make_engine():
@@ -262,21 +266,23 @@ else:
         results=browse_index(db,term[:140],provider=selected,limit=150)
     if term!=term[:140]:st.warning("Search limited to 140 characters")
     if results:
-        st.dataframe(pd.DataFrame(results)[["id","label","unit","frequency","source_url"]],
-             hide_index=True,use_container_width=True,height=370)
+        render_dataset_table(results,["id","label","unit","frequency","source_url"],
+                             height=370,max_rows=150)
     else:
         st.info("No indexed matches. Refine your search or check catalog crawl progress.")
     if selected=="FRED":
         with st.expander("Browse official FRED releases"):
-            st.dataframe(pd.DataFrame(found_releases),hide_index=True,use_container_width=True)
+            render_dataset_table(found_releases,
+                ["id","name","status","offset","series"],height=300,max_rows=500)
     st.caption("Primary Dealer keyids represent individual publisher time series. "+
        "Other NY Fed entries represent defined daily datasets, not arbitrary API endpoints.")
     try:
         st.markdown("#### Existing Databricks Gold metrics")
         gold=gold_catalog(os.getenv("DATABRICKS_CATALOG","fed_monitor"))
-        st.dataframe(pd.DataFrame([{
+        render_dataset_table([{
             "Metric":d.id,"Unit":d.unit,"Frequency":d.frequency,
-            "Gold table":d.source_url} for d in gold]),hide_index=True,use_container_width=True)
+            "Gold table":d.source_url} for d in gold],
+            ["Metric","Unit","Frequency","Gold table"],height=300,max_rows=150)
     except ValueError:
         st.warning("Invalid Gold catalog configuration.")
     st.subheader("Historical demonstration fixture freshness")

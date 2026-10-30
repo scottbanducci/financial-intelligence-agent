@@ -15,7 +15,7 @@ import pandas as pd
 import streamlit as st
 
 from financial_intelligence_agent.live.catalog_index import get_connection,search as catalog_search,status as catalog_status,release_list
-from financial_intelligence_agent.live.long_labels import install_fred_label_scrolling,render_fred_metadata
+from financial_intelligence_agent.live.long_labels import render_fred_metadata,render_dataset_table
 from financial_intelligence_agent.live.nyfed_datasets import fetch_dataset,BY_ID
 from financial_intelligence_agent.live.panels import fetch_bank_panel,contraction_breadth
 from financial_intelligence_agent.live.databricks_gold import read_gold,descriptors as gold_descriptors
@@ -100,7 +100,6 @@ def _source_publication(sources:dict[str,Series],*,title:str,subtitle:str,
 
 
 def _load_fred():
-    install_fred_label_scrolling()
     st.markdown("#### FRED · release and series discovery")
     st.caption("All FRED releases and every release's paginated series are indexed in a background worker. Search runs locally; a fresh index may be incomplete until crawling finishes.")
     with closing(get_connection()) as db:
@@ -544,7 +543,8 @@ def _advanced_tools():
     names=list(ws)
     st.markdown("##### Unit and frequency normalization")
     u1,u2,u3=st.columns(3)
-    chosen=u1.selectbox("Dataset to transform",names,key="normalize_series")
+    chosen=u1.selectbox("Dataset to transform",names,key="normalize_series",
+         format_func=lambda key:f"{ws[key]['descriptor'].label} [{key}]")
     kind=u2.selectbox("Transformation",
         ["Unit conversion","Resample to slower frequency",
          "Align observation-date convention"],key="normalize_method")
@@ -574,7 +574,8 @@ def _advanced_tools():
     st.markdown("##### Research signal check")
     st.caption("On-demand evaluation; scheduled notifications are not deployed.")
     rule_cols=st.columns(3)
-    signal=rule_cols[0].selectbox("Dataset",names,key="signal_series")
+    signal=rule_cols[0].selectbox("Dataset",names,key="signal_series",
+         format_func=lambda key:f"{ws[key]['descriptor'].label} [{key}]")
     comparator=rule_cols[1].selectbox("Condition",sorted(COMPARES),key="signal_condition")
     threshold=rule_cols[2].number_input("Threshold (source unit)",value=0.0,key="signal_level")
     horizon=st.number_input("Comparison lookback (non-null observations)",
@@ -604,13 +605,15 @@ def _advanced_tools():
 def _workspace_management():
     ws=_state()
     st.markdown("##### Working datasets")
-    summary=[{"Series ID":key,"Provider":entry["descriptor"].provider,
+    summary=[{"Series ID":key,"Dataset label":entry["descriptor"].label,
+              "Provider":entry["descriptor"].provider,
               "Unit":entry["series"].unit,"Frequency":entry["series"].frequency,
               "Observations":len(entry["series"].points),
               "Latest":max(p.date for p in entry["series"].points).isoformat()}
              for key,entry in ws.items()]
     if summary:
-        st.dataframe(pd.DataFrame(summary),hide_index=True,use_container_width=True)
+        render_dataset_table(summary,["Series ID","Dataset label","Provider",
+            "Unit","Frequency","Observations","Latest"],height=330,max_rows=80)
     st.caption("Portable research workspaces include data and provenance, not API credentials.")
     try:
         st.download_button("Download workspace JSON",export_workspace(ws),
@@ -627,7 +630,8 @@ def _workspace_management():
             st.rerun()
         except Exception as exc:st.error("Restore rejected: "+str(exc))
     if ws:
-        remove=st.multiselect("Remove datasets",list(ws),key="remove_series")
+        remove=st.multiselect("Remove datasets",list(ws),key="remove_series",
+             format_func=lambda key:f"{ws[key]['descriptor'].label} [{key}]")
         if st.button("Remove selected datasets",key="remove_selected"):
             for key in remove:ws.pop(key,None)
             st.rerun()
@@ -640,7 +644,8 @@ def _chart_builder():
         return
     st.markdown("### Chart designer")
     selected=st.multiselect("Datasets",list(ws),default=list(ws)[:min(2,len(ws))],
-                            max_selections=12,key="plot_selection")
+                            max_selections=12,key="plot_selection",
+                            format_func=lambda key:f"{ws[key]['descriptor'].label} [{key}]")
     if not selected:return
     x,y,z=st.columns(3)
     mode=x.selectbox("Scale and normalization",MODES,key="plot_mode")

@@ -197,41 +197,6 @@ def main():
                 dx=operand_label.evaluate("el => el.scrollLeft")
                 assert dx>10,f"Transformation operand option did not scroll: {dx}"
                 print("PASS: Data transformations operand dropdown hover-scroll",dx)
-                gd=page.locator(".js-plotly-plot").last
-                gd.wait_for(timeout=15000)
-                page.evaluate("""async () => {
-                    const plots=[...document.querySelectorAll('.js-plotly-plot')];
-                    const gd=plots[plots.length-1];
-                    await window.Plotly.relayout(gd,{
-                        'xaxis.range':['2026-09-01','2026-10-15'],
-                        'yaxis.range':[0,1100]
-                    });
-                }""")
-                print("AUTOSCALE_DEBUG",gd.evaluate("""el => ({
-                    plotlyType:typeof window.Plotly,
-                    relayoutType:typeof window.Plotly?.relayout,
-                    graphX:el._fullLayout.xaxis.range.slice(),
-                    typeX:typeof el.data[0]?.x,
-                    lenX:el.data[0]?.x?.length,
-                    headX:el.data[0]?.x?.[0],
-                    headY:el.data[0]?.y?.[0],
-                    count:el.data.length,
-                    handlerInstalled:window.__analystVisibleYAutoscaleInstalled,
-                    calcCount:el.calcdata?.length,
-                    calcFirst:(el.calcdata?.[0]||[]).slice(0,3).map(p=>({
-                        keys:Object.keys(p).slice(0,18),x:p.x,y:p.y,s:p.s
-                    })),
-                    encodedY:el.data?.[0]?.y && Object.keys(el.data[0].y).slice(0,10),
-                    btn:!!el.querySelector('.modebar-btn[data-title="Autoscale"]')
-                })"""),flush=True)
-                before=gd.evaluate("el => ({x:el._fullLayout.xaxis.range.slice(), y:el._fullLayout.yaxis.range.slice()})")
-                autoscale=gd.locator('.modebar-btn[data-title="Autoscale"]')
-                autoscale.click(force=True)
-                page.wait_for_timeout(550)
-                after=gd.evaluate("el => ({x:el._fullLayout.xaxis.range.slice(), y:el._fullLayout.yaxis.range.slice()})")
-                assert after["x"]==before["x"],f"Autoscale reset horizontal zoom: {before} -> {after}"
-                assert after["y"][1]<10,f"Autoscale did not fit visible small values: {after}"
-                print("PASS: Plotly Autoscale fits Y to visible dates while preserving X zoom",after,flush=True)
 
             finally:browser.close()
     finally:

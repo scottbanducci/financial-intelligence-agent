@@ -199,14 +199,21 @@ def _load_fred():
     selected_release=st.selectbox("Browse by release",options,
         format_func=lambda r:"All releases" if r is None else f'{r["name"]} ({r["series"]} indexed)',
         key="fred_release_selected")
-    query=st.text_input("Search FRED series by name, identifier or release",
-        placeholder="e.g. H.8, commercial bank credit, SOFR",key="fred_series_search")
+    query=st.text_input("Search FRED series by name, identifier, frequency, units or release",
+        placeholder="e.g. reserve total weekly, millions USD, H.4.1",
+        key="fred_series_search")
 
     include_discontinued=st.session_state.get("fred_include_discontinued",False)
-    with closing(get_connection()) as db:
-        matches=catalog_search(db,query,provider="FRED",
-            release_id=selected_release["id"] if selected_release is not None else None,
-            limit=150,include_discontinued=include_discontinued)
+    # Never serialize the entire unfiltered FRED index (potentially hundreds
+    # of thousands of rows) into one browser dropdown. Every scoped search
+    # does return all matches, without a hidden numerical result cutoff.
+    search_scoped=bool(query.strip()) or selected_release is not None
+    matches=[]
+    if search_scoped:
+        with closing(get_connection()) as db:
+            matches=catalog_search(db,query,provider="FRED",
+                release_id=selected_release["id"] if selected_release is not None else None,
+                include_discontinued=include_discontinued)
     # Keep the catalog toggle compact, right-aligned beside the Series label.
     label_col,toggle_col=st.columns([1,1],vertical_alignment="center")
     with label_col:
@@ -214,16 +221,22 @@ def _load_fred():
     with toggle_col:
         st.toggle("Include discontinued series",value=False,
                   key="fred_include_discontinued",width="content")
+    if not search_scoped:
+        st.selectbox("Series",["Search or choose a release to browse series"],
+                     disabled=True,label_visibility="collapsed",key="fred_empty_series")
+        st.caption("Search the complete indexed catalog or choose a release. All matching "
+                   "series are returned; no results are hidden by a dropdown limit.")
+        return
     if not matches:
         st.selectbox("Series",["No matching indexed series"],disabled=True,
                      label_visibility="collapsed",key="fred_empty_series")
         st.info("No matching series in the indexed catalog. Try enabling discontinued series, "
-                "refining your search, or allowing the release crawl to finish.")
+                "changing the search terms, or allowing the release crawl to finish.")
         return
     chosen=st.selectbox("Series",matches,
         format_func=lambda item:f'{item["label"]} · {item["id"][5:]} ({item["frequency"]}, {item["unit"]})',
         label_visibility="collapsed",key="fred_series_item")
-    if len(matches)==150:st.caption("Showing the first 150 matches. Refine your search to narrow the results.")
+    st.caption(f"{len(matches):,} matching series in the indexed catalog · Showing all matches")
     with st.expander("Metadata for indexed series"):
         render_fred_metadata(matches[:75])
     earliest=date(1776,1,1)

@@ -49,6 +49,73 @@ class CatalogIndexTests(unittest.TestCase):
         self.assertTrue(search(self.db,"repo",provider="NYFED_DATASET",
                                include_discontinued=False))
 
+    def test_series_search_matches_displayed_frequency_units_and_id(self):
+        from financial_intelligence_agent.live.catalog_index import put_entry
+        put_entry(self.db,Descriptor(
+            "FRED:WRESBAL",
+            "Reserve Balances at Federal Reserve Banks, Total",
+            "FRED","Millions of USD","weekly","Federal Reserve reporting",
+            "https://fred.stlouisfed.org/series/WRESBAL",
+            "FRED_realtime_vintage"))
+        put_entry(self.db,Descriptor(
+            "FRED:MRESBAL",
+            "Reserve Balances at Federal Reserve Banks, Total",
+            "FRED","Billions of USD","monthly","Federal Reserve reporting",
+            "https://fred.stlouisfed.org/series/MRESBAL",
+            "FRED_realtime_vintage"))
+        self.db.execute(
+            "INSERT INTO fred_releases(release_id,name) VALUES (401,'H.4.1 Federal Reserve Balance Sheet')")
+        for code in ("WRESBAL","MRESBAL"):
+            self.db.execute(
+                "INSERT INTO fred_release_members(release_id,series_id) VALUES (401,?)",
+                ("FRED:"+code,))
+        self.db.commit()
+        weekly=search(self.db,"reserve total weekly",provider="FRED",
+                      release_id=401,include_discontinued=False)
+        self.assertEqual([row["id"] for row in weekly],["FRED:WRESBAL"])
+        # Tokens may appear in any order and match across label, frequency,
+        # units, ID and release rather than only the original series title.
+        self.assertEqual([x["id"] for x in search(
+            self.db,"weekly total reserve",provider="FRED",release_id=401)],
+            ["FRED:WRESBAL"])
+        self.assertEqual([x["id"] for x in search(
+            self.db,"h.4.1 reserve millions weekly",provider="FRED")],
+            ["FRED:WRESBAL"])
+        self.assertEqual([x["id"] for x in search(
+            self.db,"wresbal millions",provider="FRED")],
+            ["FRED:WRESBAL"])
+        self.assertEqual([x["id"] for x in search(
+            self.db,"total monthly billions",provider="FRED",release_id=401)],
+            ["FRED:MRESBAL"])
+
+    def test_unlimited_series_search_includes_beyond_old_150_and_250_caps(self):
+        from financial_intelligence_agent.live.catalog_index import put_entry
+        self.db.execute(
+            "INSERT INTO fred_releases(release_id,name) VALUES (901,'Large release')")
+        for i in range(311):
+            sid=f"FRED:EXAMPL{i:04d}"
+            put_entry(self.db,Descriptor(
+                sid,f"Example indexed weekly series {i:04d}",
+                "FRED","Millions of USD","weekly","Test release",
+                "https://fred.stlouisfed.org/series/"+sid[5:],
+                "FRED_realtime_vintage"))
+            self.db.execute(
+                "INSERT INTO fred_release_members(release_id,series_id) VALUES (901,?)",
+                (sid,))
+        self.db.commit()
+        all_matches=search(self.db,"example weekly",provider="FRED",
+                           release_id=901)
+        self.assertEqual(len(all_matches),311)
+        self.assertEqual(len({row["id"] for row in all_matches}),311)
+        self.assertIn("FRED:EXAMPL0310",{row["id"] for row in all_matches})
+        self.assertEqual(len(search(self.db,"",provider="FRED",release_id=901)),311)
+        # Explicit limits remain available to existing NY Fed callers, but
+        # the FRED dropdown no longer supplies one.
+        self.assertEqual(len(search(self.db,"example",provider="FRED",
+                                    release_id=901,limit=2)),2)
+        self.assertEqual(len(search(self.db,"example",provider="FRED",
+                                    release_id=901,limit=300)),300)
+
     def test_provider_split_and_local_search(self):
         self.assertGreaterEqual(len(search(self.db,"repo",provider="NYFED_DATASET")),3)
         self.assertGreaterEqual(len(search(self.db,"bank",provider="FRED")),1)

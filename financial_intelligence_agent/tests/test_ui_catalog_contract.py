@@ -38,6 +38,17 @@ class CatalogUIContract(unittest.TestCase):
         self.assertIn('include_discontinued=include_discontinued',studio)
         self.assertNotIn("Y-axis automatically follows the observed range rather than starting at zero.",studio)
 
+    def test_global_dataset_scrolling_all_workspaces(self):
+        app=(ROOT/"app.py").read_text()
+        studio=(ROOT/"src/financial_intelligence_agent/live/studio.py").read_text()
+        self.assertIn("install_dataset_label_scrolling()",app)
+        self.assertIn("render_dataset_table(results",app)
+        self.assertIn("render_dataset_table(found_releases",app)
+        self.assertIn("render_dataset_table(summary",studio)
+        self.assertIn("render_dataset_table([",app)
+        self.assertIn("format_func=lambda key:f\"{ws[key]['descriptor'].label}",studio)
+        self.assertNotIn("'[:220]",studio)
+
     def test_local_secrets_not_committed(self):
         ignore=(ROOT/".gitignore").read_text()
         self.assertIn(".env",ignore)

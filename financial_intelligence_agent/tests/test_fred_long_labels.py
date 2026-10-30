@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT / "src"))
 
 from financial_intelligence_agent.live.long_labels import (
-    metadata_html, _SCROLL_SCRIPT, _SCROLL_STYLE,
+    metadata_html, dataset_table_html, _SCROLL_SCRIPT, _SCROLL_STYLE,
 )
 
 
@@ -50,14 +50,41 @@ class FredLongLabelsTests(unittest.TestCase):
         self.assertEqual(content.count('<tr><td'),75)
         self.assertNotIn("FRED:ROW99",content)
 
+    def test_global_table_reveals_all_text_and_safely_escapes(self):
+        full="Very long publisher research dataset description "*20
+        sample=[{"id":"NYFED_PD:LONG","label":full,
+                 "source_url":'<script>alert("x")</script>',"count":12}]
+        rendered=dataset_table_html(sample,
+                     ["id","label","source_url","count"],max_rows=100)
+        self.assertIn('class="dataset-label-viewport"',rendered)
+        self.assertIn('aria-label="'+full+'"',rendered)
+        self.assertIn("&lt;script&gt;",rendered)
+        self.assertNotIn("<script>",rendered)
+        self.assertEqual(rendered.count('dataset-label-viewport'),4)
+    def test_global_table_limits_row_count_and_bounds(self):
+        rows=[{"name":"Row "+str(i)} for i in range(40)]
+        rendered=dataset_table_html(rows,["name"],max_rows=12,height=280)
+        self.assertEqual(rendered.count('<tr><td'),12)
+        self.assertNotIn("Row 39",rendered)
+        with self.assertRaises(ValueError):
+            dataset_table_html(rows,["name"],max_rows=0)
+        with self.assertRaises(ValueError):
+            dataset_table_html(rows,["name"],height=10)
+    def test_global_selector_and_selected_value_behavior(self):
+        self.assertIn('[data-testid="stSelectbox"] input',_SCROLL_SCRIPT)
+        self.assertIn('[data-testid="stMultiSelect"]',_SCROLL_SCRIPT)
+        self.assertIn('.dataset-label-viewport',_SCROLL_SCRIPT)
+        self.assertIn("window.__datasetLongLabelScrollInstalled",_SCROLL_SCRIPT)
+        self.assertIn('prefers-reduced-motion',_SCROLL_SCRIPT)
+
     def test_dropdown_scroll_targets_only_series_options(self):
-        self.assertIn('aria-label="Series"',_SCROLL_SCRIPT)
+        self.assertIn("closest('[role=\"listbox\"]')",_SCROLL_SCRIPT)
         self.assertIn("[data-item-hl]",_SCROLL_SCRIPT)
         self.assertIn("pointerover",_SCROLL_SCRIPT)
         self.assertIn("pointerout",_SCROLL_SCRIPT)
         self.assertIn("scrollWidth - target.clientWidth",_SCROLL_SCRIPT)
         self.assertIn("prefers-reduced-motion",_SCROLL_SCRIPT)
-        self.assertIn("[role=\"listbox\"][aria-label=\"Series\"]",_SCROLL_STYLE)
+        self.assertIn('[role="listbox"] [role="option"]',_SCROLL_STYLE)
         self.assertIn("fred-label-viewport",_SCROLL_STYLE)
         self.assertIn('tableCell = node.closest(".fred-label-viewport")',_SCROLL_SCRIPT)
 

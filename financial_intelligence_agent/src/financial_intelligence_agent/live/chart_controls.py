@@ -1,8 +1,8 @@
 """Common, accessible analyst date selectors for Plotly time-series charts.
 
-Streamlit segmented buttons are used instead of Plotly rangeselector so
-selecting a longer period can request additional publisher history on
-the server. They do not initiate API requests themselves.
+Borderless Streamlit tertiary buttons are used instead of Plotly rangeselector
+so selecting a longer period can request additional publisher history on the
+server. They do not initiate API requests themselves.
 """
 from __future__ import annotations
 from datetime import date,datetime,timezone
@@ -30,6 +30,13 @@ def _select_preset(prefix:str,earliest:date,
     st.session_state[prefix+"_start"]=a
     st.session_state[prefix+"_end"]=b
 
+def _choose_preset(prefix:str,selected:str,earliest:date,
+                   all_start:Callable[[],date]|None=None)->None:
+    """Tertiary button callback, independent of Streamlit widget-owned state."""
+    st.session_state[prefix+"_preset"]=selected
+    _select_preset(prefix,earliest,all_start)
+
+
 def _manual_window(prefix:str)->None:
     st.session_state[prefix+"_preset"]=None
 
@@ -40,6 +47,8 @@ def _init_window(prefix:str,earliest:date)->date:
         a,b=preset_window(DEFAULT,today,earliest=earliest)
         st.session_state[prefix+"_start"]=a
         st.session_state[prefix+"_end"]=b
+    if prefix+"_preset" not in st.session_state:
+        st.session_state[prefix+"_preset"]=DEFAULT
     return today
 
 
@@ -82,6 +91,19 @@ def period_controls(prefix:str,*,earliest:date,
     date keys consumed by window_controls().
     """
     _init_window(prefix,earliest)
-    st.segmented_control("Chart period",PRESETS,default=DEFAULT,
-                         key=prefix+"_preset",selection_mode="single",
-                         on_change=_select_preset,args=(prefix,earliest,all_start))
+    selected=st.session_state.get(prefix+"_preset")
+    st.caption("Chart period")
+    # No segmented-control DOM or grouped border: these are native
+    # borderless tertiary buttons, each with its own stable widget key.
+    if selected in PRESETS:
+        st.markdown(
+            "<style>.st-key-"+prefix+"_preset_"+selected+
+            " button{background:rgba(22,143,136,.25)!important;"
+            "color:#41ded0!important}</style>",unsafe_allow_html=True)
+    with st.container(horizontal=True,gap="small",border=False,
+                      key=prefix+"_period_toolbar"):
+        for option in PRESETS:
+            st.button(option,key=prefix+"_preset_"+option,
+                      type="tertiary",width="content",
+                      on_click=_choose_preset,
+                      args=(prefix,option,earliest,all_start))

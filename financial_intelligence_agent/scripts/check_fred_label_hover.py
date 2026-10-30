@@ -162,7 +162,7 @@ def main():
                 uploader=page.locator('[data-testid="stFileUploader"] input[type="file"]').first
                 uploader.set_input_files({
                     "name":"local-fixture.csv","mimeType":"text/csv",
-                    "buffer":b"observation_date,value\n2026-10-01,1.0\n2026-10-02,1.2\n"
+                    "buffer":b"observation_date,value\n2026-05-01,1000.0\n2026-10-01,1.0\n2026-10-02,1.2\n"
                 })
                 key="REALLYLONGTRANSFORMDATASET_"+("X"*47)
                 series_key=page.get_by_role("textbox",name="Series key")
@@ -183,18 +183,24 @@ def main():
                 dx=operand_label.evaluate("el => el.scrollLeft")
                 assert dx>10,f"Transformation operand option did not scroll: {dx}"
                 print("PASS: Data transformations operand dropdown hover-scroll",dx)
-                probe=page.evaluate("""() => {
-                  const gd=document.querySelector('.js-plotly-plot');
-                  return gd ? {
-                    windowPlotly:typeof window.Plotly,
-                    gdKeys:Object.keys(gd).slice(0,35),
-                    gdContextKeys:Object.keys(gd._context||{}).slice(0,35),
-                    modebarButtons:[...gd.querySelectorAll('.modebar-btn')]
-                      .map(x=>x.getAttribute('data-title')).slice(0,15),
-                    gdOn:typeof gd.on,gdEmit:typeof gd.emit,
-                  } : {error:'no plotly DOM'};
+                gd=page.locator(".js-plotly-plot").last
+                gd.wait_for(timeout=15000)
+                page.evaluate("""async () => {
+                    const plots=[...document.querySelectorAll('.js-plotly-plot')];
+                    const gd=plots[plots.length-1];
+                    await window.Plotly.relayout(gd,{
+                        'xaxis.range':['2026-09-01','2026-10-15'],
+                        'yaxis.range':[0,1100]
+                    });
                 }""")
-                print("CHART_JS_PROBE",probe,flush=True)
+                before=gd.evaluate("el => ({x:el._fullLayout.xaxis.range.slice(), y:el._fullLayout.yaxis.range.slice()})")
+                autoscale=gd.locator('.modebar-btn[data-title="Autoscale"]')
+                autoscale.click(force=True)
+                page.wait_for_timeout(550)
+                after=gd.evaluate("el => ({x:el._fullLayout.xaxis.range.slice(), y:el._fullLayout.yaxis.range.slice()})")
+                assert after["x"]==before["x"],f"Autoscale reset horizontal zoom: {before} -> {after}"
+                assert after["y"][1]<10,f"Autoscale did not fit visible small values: {after}"
+                print("PASS: Plotly Autoscale fits Y to visible dates while preserving X zoom",after,flush=True)
 
             finally:browser.close()
     finally:

@@ -77,6 +77,15 @@ class FredLongLabelsTests(unittest.TestCase):
         self.assertIn("window.__datasetLongLabelScrollInstalled",_SCROLL_SCRIPT)
         self.assertIn('prefers-reduced-motion',_SCROLL_SCRIPT)
 
+    def test_plotly_visible_y_autoscale_handler_installed(self):
+        from financial_intelligence_agent.live.long_labels import _VISIBLE_Y_AUTOSCALE
+        self.assertIn("modebar-btn",_VISIBLE_Y_AUTOSCALE)
+        self.assertIn('data-title="Autoscale"',_VISIBLE_Y_AUTOSCALE)
+        self.assertIn("event.stopImmediatePropagation()",_VISIBLE_Y_AUTOSCALE)
+        self.assertIn("Plotly.relayout(gd,changes)",_VISIBLE_Y_AUTOSCALE)
+        self.assertIn("xaxis",_VISIBLE_Y_AUTOSCALE)
+        self.assertIn('yaxis',_VISIBLE_Y_AUTOSCALE)
+
     def test_dropdown_scroll_targets_only_series_options(self):
         self.assertIn("closest('[role=\"listbox\"]')",_SCROLL_SCRIPT)
         self.assertIn("[data-item-hl]",_SCROLL_SCRIPT)

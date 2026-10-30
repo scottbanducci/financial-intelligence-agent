@@ -86,7 +86,7 @@ class FredLongLabelsTests(unittest.TestCase):
         self.assertIn("prefers-reduced-motion",_SCROLL_SCRIPT)
         self.assertIn('[role="listbox"] [role="option"]',_SCROLL_STYLE)
         self.assertIn("fred-label-viewport",_SCROLL_STYLE)
-        self.assertIn('tableCell = node.closest(".fred-label-viewport")',_SCROLL_SCRIPT)
+        self.assertIn('node.closest(".fred-label-viewport, .dataset-label-viewport")',_SCROLL_SCRIPT)
 
 if __name__ == "__main__":
     unittest.main()

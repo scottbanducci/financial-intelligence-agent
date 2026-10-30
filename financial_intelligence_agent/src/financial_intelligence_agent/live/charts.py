@@ -116,7 +116,7 @@ def interactive_chart(data:pd.DataFrame,spec:ChartSpec,unit:str):
     )
     fig.add_annotation(text=spec.subtitle[:250],xref="paper",yref="paper",x=0,y=1.12,
                        xanchor="left",showarrow=False,font={"size":12,"color":"#aabacb"})
-    return fig
+    return scale_y_to_visible(fig,spec.start,spec.end)
 
 
 def preview_figure(series:Series,label:str):
@@ -145,6 +145,41 @@ def preview_figure(series:Series,label:str):
         yaxis=dict(range=[low-padding,high+padding],rangemode="normal",
                    showgrid=True,zeroline=False),
         hovermode="x unified",margin={"l":65,"r":25,"t":65,"b":60})
+    return fig
+
+
+def scale_y_to_visible(fig, start:date|None=None,end:date|None=None):
+    """Fit every visible Plotly Y-axis to points within the current X window.
+
+    Applied on initial render and date-preset changes. This is also the
+    arithmetic contract for the client-side Y-only fit after drag zoom.
+    """
+    import math
+    from datetime import datetime
+    from collections import defaultdict
+    values=defaultdict(list)
+    for trace in fig.data:
+        if getattr(trace,"visible",True) in ("legendonly",False):continue
+        xs=getattr(trace,"x",None)
+        ys=getattr(trace,"y",None)
+        if xs is None or ys is None:continue
+        axis=getattr(trace,"yaxis",None) or "y"
+        axis="yaxis"+str(axis)[1:] if str(axis).startswith("y") and len(str(axis))>1 else "yaxis"
+        for x,y in zip(xs,ys):
+            try:
+                d=x.date() if isinstance(x,datetime) else (
+                    x if isinstance(x,date) else date.fromisoformat(str(x)[:10]))
+                v=float(y)
+                if math.isfinite(v) and (start is None or d>=start) and (end is None or d<=end):
+                    values[axis].append(v)
+            except (TypeError,ValueError,OverflowError):continue
+    for axis,vals in values.items():
+        low,high=min(vals),max(vals)
+        padding=max((high-low)*.06,abs(low)*.0005,abs(high)*.0005,1e-9)
+        fig.update_layout({axis:{"range":[low-padding,high+padding],
+                                 "autorange":False,"zeroline":False}})
+    if start is not None and end is not None:
+        fig.update_xaxes(range=[start.isoformat(),end.isoformat()])
     return fig
 
 

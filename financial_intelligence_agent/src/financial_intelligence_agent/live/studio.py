@@ -203,6 +203,9 @@ def _load_fred():
             release_id=selected_release["id"] if selected_release is not None else None,
             limit=150,include_discontinued=include_discontinued)
     if not matches:
+        st.selectbox("Series",["No matching indexed series"],disabled=True,
+                     key="fred_empty_series")
+        st.toggle("Include discontinued series",value=False,key="fred_include_discontinued")
         st.info("No matching series in the indexed catalog. Try enabling discontinued series, "
                 "refining your search, or allowing the release crawl to finish.")
         return

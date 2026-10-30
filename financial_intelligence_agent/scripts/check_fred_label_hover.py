@@ -31,6 +31,10 @@ def prepare_seed():
            TEST_ID,TEST_NAME,"FRED","percent","daily",
            "Test","https://fred.stlouisfed.org/series/LONG_SERIES",
            "FRED_realtime_vintage"))
+        put_entry(db,Descriptor(
+           "NYFED_PD:LONG_PD","REALLYLONG Primary Dealer Statistics net financing and positions "*12,
+           "NYFED_PD","Millions of USD","weekly","Primary Dealer Statistics",
+           "https://markets.newyorkfed.org/api/pd/get/LONG_PD.json"))
         db.commit()
     finally:db.close()
 
@@ -102,6 +106,41 @@ def main():
                 meta_distance=viewport.evaluate("el => el.scrollLeft")
                 assert meta_distance>15,f"Metadata label did not scroll on hover: {meta_distance}"
                 print("PASS: metadata label scrolls horizontally on hover",meta_distance)
+                # Same hover functionality is installed globally, so a
+                # NY Fed dropdown can reveal long dealer descriptions too.
+                page.get_by_role("tab",name="NY Fed",exact=True).click()
+                nysearch=page.get_by_placeholder(
+                    "repo, reverse repo, agency MBS, liquidity swaps, primary dealer, SOFR...")
+                nysearch.fill("LONG_PD")
+                nysearch.press("Enter")
+                field=page.locator('[data-testid="stSelectbox"]').filter(
+                    has=page.get_by_text("Dataset to chart",exact=True))
+                field.locator("input").wait_for(timeout=20000)
+                field.locator("input").click()
+                nyoption=page.locator('[role="listbox"] [role="option"]').filter(
+                    has_text="REALLYLONG").first
+                nyoption.wait_for(timeout=15000)
+                nylab=nyoption.locator("[data-item-hl]")
+                nyoption.hover()
+                page.wait_for_timeout(2500)
+                nydist=nylab.evaluate("el => el.scrollLeft")
+                assert nydist>15,f"NY Fed dataset options did not scroll: {nydist}"
+                print("PASS: NY Fed dataset dropdown hover-scroll",nydist)
+
+                # Search-result inventories use accessible, text-based table
+                # cells rather than a canvas grid where hover is opaque.
+                page.get_by_text("Data catalog",exact=True).first.click()
+                catsearch=page.get_by_placeholder("Search ID, title, description or release")
+                catsearch.fill("LONG_SERIES")
+                catsearch.press("Enter")
+                catalog_cell=page.locator(".dataset-label-viewport").filter(
+                    has_text="REALLYLONG").first
+                catalog_cell.wait_for(timeout=15000)
+                catalog_cell.hover()
+                page.wait_for_timeout(2500)
+                catdist=catalog_cell.evaluate("el => el.scrollLeft")
+                assert catdist>15,f"Data Catalog metadata label did not scroll: {catdist}"
+                print("PASS: Data Catalog dataset labels hover-scroll",catdist)
             finally:browser.close()
     finally:
         server.terminate()

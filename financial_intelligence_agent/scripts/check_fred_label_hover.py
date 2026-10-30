@@ -97,7 +97,13 @@ def main():
                     print("DEBUG scroll JS globals:",page.evaluate("""() => ({
                         labelsInstalled:window.__datasetLongLabelScrollInstalled,
                         yInstalled:window.__analystVisibleYAutoscaleInstalled,
-                        scripts:Array.from(document.querySelectorAll('script')).length,
+                        scripts:Array.from(document.querySelectorAll('script'))
+                          .map(el => ({size:el.textContent.length,
+                            labels:el.textContent.includes('__datasetLongLabelScrollInstalled'),
+                            y:el.textContent.includes('__analystVisibleYAutoscaleInstalled'),
+                            parseError:(() => {try {
+                              new Function(el.textContent);return null;
+                            } catch(e) {return String(e);}})()})),
                         overflow:Array.from(document.querySelectorAll('[role="listbox"] [data-item-hl]'))
                           .map(el=>({c:el.clientWidth,s:el.scrollWidth,left:el.scrollLeft}))
                     })"""),flush=True)

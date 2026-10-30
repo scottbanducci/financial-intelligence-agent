@@ -93,6 +93,14 @@ def main():
                 assert initial["scroll"]>initial["width"]+20,initial
                 page.wait_for_timeout(2500)
                 distance=label.evaluate("el => el.scrollLeft")
+                if distance<=15:
+                    print("DEBUG scroll JS globals:",page.evaluate("""() => ({
+                        labelsInstalled:window.__datasetLongLabelScrollInstalled,
+                        yInstalled:window.__analystVisibleYAutoscaleInstalled,
+                        scripts:Array.from(document.querySelectorAll('script')).length,
+                        overflow:Array.from(document.querySelectorAll('[role="listbox"] [data-item-hl]'))
+                          .map(el=>({c:el.clientWidth,s:el.scrollWidth,left:el.scrollLeft}))
+                    })"""),flush=True)
                 assert distance>15,f"Series dropdown did not scroll on hover: {distance}"
                 print("PASS: native Series dropdown option scrolls horizontally on hover",distance)
 

@@ -34,17 +34,23 @@ def _manual_window(prefix:str)->None:
     st.session_state[prefix+"_preset"]=None
 
 def window_controls(prefix:str,*,earliest:date,show_dates:bool=True,
-                    all_start:Callable[[],date]|None=None)->tuple[date,date]:
+                    all_start:Callable[[],date]|None=None,
+                    show_controls:bool=True)->tuple[date,date]:
     """Nine compact Yahoo-style buttons, default six months; optional dates.
 
     A date input sets Custom mode (none of the nine preset buttons remains
     selected). Streamlit callbacks update dates before widgets instantiate.
+    With show_controls=False, initialize and return the range without rendering
+    chart widgets, allowing the initial publisher fetch to precede the chart.
     """
     today=_browser_today()
     if prefix+"_start" not in st.session_state:
         a,b=preset_window(DEFAULT,today,earliest=earliest)
         st.session_state[prefix+"_start"]=a
         st.session_state[prefix+"_end"]=b
+    if not show_controls:
+        return (st.session_state[prefix+"_start"],
+                st.session_state[prefix+"_end"])
     st.segmented_control("Chart period",PRESETS,default=DEFAULT,
                          key=prefix+"_preset",selection_mode="single",
                          on_change=_select_preset,args=(prefix,earliest,all_start))

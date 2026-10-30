@@ -206,23 +206,31 @@ def _load_fred():
         matches=catalog_search(db,query,provider="FRED",
             release_id=selected_release["id"] if selected_release is not None else None,
             limit=150,include_discontinued=include_discontinued)
+    # Keep the catalog toggle compact, right-aligned beside the Series label.
+    label_col,toggle_col=st.columns([1,1],vertical_alignment="center")
+    with label_col:
+        st.markdown('<div class="fred-series-label">Series</div>',unsafe_allow_html=True)
+    with toggle_col:
+        st.toggle("Include discontinued series",value=False,
+                  key="fred_include_discontinued",width="content")
     if not matches:
         st.selectbox("Series",["No matching indexed series"],disabled=True,
-                     key="fred_empty_series")
-        st.toggle("Include discontinued series",value=False,key="fred_include_discontinued")
+                     label_visibility="collapsed",key="fred_empty_series")
         st.info("No matching series in the indexed catalog. Try enabling discontinued series, "
                 "refining your search, or allowing the release crawl to finish.")
         return
     chosen=st.selectbox("Series",matches,
         format_func=lambda item:f'{item["label"]} · {item["id"][5:]} ({item["frequency"]}, {item["unit"]})',
-        key="fred_series_item")
-    st.toggle("Include discontinued series",value=False,key="fred_include_discontinued")
+        label_visibility="collapsed",key="fred_series_item")
     if len(matches)==150:st.caption("Showing the first 150 matches. Refine your search to narrow the results.")
     with st.expander("Metadata for indexed series"):
         render_fred_metadata(matches[:75])
     earliest=date(1776,1,1)
+    has_chart=(st.session_state.get("fred_last_result")==chosen["id"]
+               and chosen["id"] in _state())
     start,end=window_controls("fred_range",earliest=earliest,
-                              all_start=lambda:_fred_first_date(chosen["id"]))
+                              all_start=lambda:_fred_first_date(chosen["id"]),
+                              show_controls=has_chart)
     if st.button("Load FRED observations",type="primary",key="fred_load_observations"):
         try:
             with st.spinner("Loading FRED data; using the private server API key"):
@@ -235,9 +243,13 @@ def _load_fred():
                            frequency=descriptor.frequency)
             _add(chosen["id"],series,descriptor,found.retrieved_at,found.warning)
             st.session_state["fred_last_result"]=chosen["id"]
-            st.success(f"Loaded {len(series.points):,} published observations")
+            st.session_state["fred_loaded_range"]=(start,end)
+            st.session_state["fred_load_notice"]=f"Loaded {len(series.points):,} published observations"
+            st.rerun()  # Newly available chart controls appear on this same interaction.
         except Exception as exc:st.error("FRED series request failed: "+str(exc))
     recent=st.session_state.get("fred_last_result")
+    if recent==chosen["id"] and st.session_state.get("fred_load_notice"):
+        st.success(st.session_state.pop("fred_load_notice"))
     if recent==chosen["id"] and recent in _state():
         # A preset change only fetches uncovered dates. Shortening a window
         # uses cached history without another publisher call.
@@ -351,7 +363,9 @@ def _load_nyfed():
     # ALL uses the supported publisher-history horizon. Older NY Fed
     # records can be sourced separately where published by the issuer.
     ny_first=date(1986,1,1) if choice["provider"]=="NYFED_PD" else date(2000,1,1)
-    start,end=window_controls("nyfed_range",earliest=ny_first)
+    loaded_before=st.session_state.get("nyfed_loaded") or {}
+    start,end=window_controls("nyfed_range",earliest=ny_first,
+                              show_controls=loaded_before.get("id")==choice["id"])
     if st.button("Load NY Fed dataset",key="nyfed_fetch_dataset",type="primary"):
         try:
             if choice["provider"]=="NYFED_PD":
@@ -388,11 +402,15 @@ def _load_nyfed():
                          "NY Fed published volume, billions of USD")
                 st.session_state["nyfed_loaded"]={"kind":"product","id":choice["id"],
                                                    "result":result}
-            st.success("Publisher observations loaded and available in Data transformations.")
+            st.session_state["nyfed_loaded_range"]=(start,end)
+            st.session_state["nyfed_load_notice"]=True
+            st.rerun()  # Show chart period controls now that this dataset is loaded.
         except Exception as exc:
             st.error("NY Fed request rejected: "+str(exc))
             st.session_state.pop("nyfed_loaded",None)
     loaded=st.session_state.get("nyfed_loaded")
+    if loaded and loaded["id"]==choice["id"] and st.session_state.pop("nyfed_load_notice",False):
+        st.success("Publisher observations loaded and available in Data transformations.")
     if loaded is None:return
     if loaded["id"]!=choice["id"]:
         st.info("Select Load NY Fed dataset to update the chart to the current dataset.")

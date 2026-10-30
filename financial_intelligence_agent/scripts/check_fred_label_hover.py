@@ -135,7 +135,7 @@ def main():
                 # Search-result inventories use accessible, text-based table
                 # cells rather than a canvas grid where hover is opaque.
                 page.get_by_text("Data catalog",exact=True).first.click()
-                catsearch=page.get_by_placeholder("Search ID, title, description or release")
+                catsearch=page.get_by_role("textbox",name="Search ID, title, description or release")
                 catsearch.fill("LONG_SERIES")
                 catsearch.press("Enter")
                 catalog_cell=page.locator(".dataset-label-viewport").filter(

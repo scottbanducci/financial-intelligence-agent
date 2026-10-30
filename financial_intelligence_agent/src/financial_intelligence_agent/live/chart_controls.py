@@ -33,27 +33,30 @@ def _select_preset(prefix:str,earliest:date,
 def _manual_window(prefix:str)->None:
     st.session_state[prefix+"_preset"]=None
 
-def window_controls(prefix:str,*,earliest:date,show_dates:bool=True,
-                    all_start:Callable[[],date]|None=None,
-                    show_controls:bool=True)->tuple[date,date]:
-    """Nine compact Yahoo-style buttons, default six months; optional dates.
-
-    A date input sets Custom mode (none of the nine preset buttons remains
-    selected). Streamlit callbacks update dates before widgets instantiate.
-    With show_controls=False, initialize and return the range without rendering
-    chart widgets, allowing the initial publisher fetch to precede the chart.
-    """
+def _init_window(prefix:str,earliest:date)->date:
+    """Initialize a range even when no chart or selector is rendered."""
     today=_browser_today()
     if prefix+"_start" not in st.session_state:
         a,b=preset_window(DEFAULT,today,earliest=earliest)
         st.session_state[prefix+"_start"]=a
         st.session_state[prefix+"_end"]=b
+    return today
+
+
+def window_controls(prefix:str,*,earliest:date,show_dates:bool=True,
+                    all_start:Callable[[],date]|None=None,
+                    show_controls:bool=True)->tuple[date,date]:
+    """Render the From/Through inputs before loading a chart.
+
+    The period buttons are intentionally separate: call period_controls()
+    immediately before the visible chart. Keeping the selectors apart also
+    allows the initial publisher request to use the default six-month window.
+    A manually edited date range clears the selected period preset.
+    """
+    today=_init_window(prefix,earliest)
     if not show_controls:
         return (st.session_state[prefix+"_start"],
                 st.session_state[prefix+"_end"])
-    st.segmented_control("Chart period",PRESETS,default=DEFAULT,
-                         key=prefix+"_preset",selection_mode="single",
-                         on_change=_select_preset,args=(prefix,earliest,all_start))
     if show_dates:
         a,b=st.columns(2)
         start=a.date_input("From",key=prefix+"_start",
@@ -68,3 +71,17 @@ def window_controls(prefix:str,*,earliest:date,show_dates:bool=True,
     if start>end:
         st.error("Date range is reversed. Choose an earlier start date.")
     return start,end
+
+
+def period_controls(prefix:str,*,earliest:date,
+                    all_start:Callable[[],date]|None=None)->None:
+    """Render borderless date presets immediately above an existing chart.
+
+    The caller must check that there are observations to plot before calling.
+    Preset callbacks run before the next Streamlit rerun and update the same
+    date keys consumed by window_controls().
+    """
+    _init_window(prefix,earliest)
+    st.segmented_control("Chart period",PRESETS,default=DEFAULT,
+                         key=prefix+"_preset",selection_mode="single",
+                         on_change=_select_preset,args=(prefix,earliest,all_start))

@@ -1,4 +1,4 @@
-"""Real Chromium smoke test for FRED horizontal hover scrolling.
+"""Real Chromium smoke test for application-wide dataset horizontal hover scrolling.
 
 Run from the financial_intelligence_agent directory after installing the app
 and Playwright Chromium; no API key or remote provider call is needed.
@@ -146,6 +146,36 @@ def main():
                 catdist=catalog_cell.evaluate("el => el.scrollLeft")
                 assert catdist>15,f"Data Catalog metadata label did not scroll: {catdist}"
                 print("PASS: Data Catalog dataset labels hover-scroll",catdist)
+                # Exercise the shared event handler in Data transformations,
+                # where options represent workspace datasets rather than
+                # FRED/NY Fed publisher catalog records.
+                page.get_by_text("Live Data Studio",exact=True).first.click()
+                page.get_by_role("tab",name="FFIEC / CSV upload",exact=True).click()
+                uploader=page.locator('[data-testid="stFileUploader"] input[type="file"]').first
+                uploader.set_input_files({
+                    "name":"local-fixture.csv","mimeType":"text/csv",
+                    "buffer":b"observation_date,value\\n2026-10-01,1.0\\n2026-10-02,1.2\\n"
+                })
+                key="REALLYLONGTRANSFORMDATASET_"+("X"*47)
+                series_key=page.get_by_role("textbox",name="Series key")
+                series_key.fill(key)
+                series_key.press("Enter")
+                page.get_by_role("button",name="Validate & add to workspace").click()
+                page.get_by_text("Data transformations",exact=True).first.click()
+                operand=page.locator('[data-testid="stSelectbox"]').filter(
+                    has=page.get_by_text("2 · First dataset",exact=True))
+                operand.locator("input").wait_for(timeout=15000)
+                operand.locator("input").click()
+                transform_option=page.locator('[role="listbox"] [role="option"]').filter(
+                    has_text="REALLYLONGTRANSFORMDATASET").first
+                transform_option.wait_for(timeout=15000)
+                transform_option.hover()
+                operand_label=transform_option.locator("[data-item-hl]")
+                page.wait_for_timeout(1700)
+                dx=operand_label.evaluate("el => el.scrollLeft")
+                assert dx>10,f"Transformation operand option did not scroll: {dx}"
+                print("PASS: Data transformations operand dropdown hover-scroll",dx)
+
             finally:browser.close()
     finally:
         server.terminate()

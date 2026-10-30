@@ -17,7 +17,8 @@ import streamlit as st
 from financial_intelligence_agent.live.catalog_index import get_connection,search as catalog_search,status as catalog_status,release_list
 from financial_intelligence_agent.live.long_labels import render_fred_metadata,render_dataset_table
 from financial_intelligence_agent.live.nyfed_datasets import fetch_dataset,BY_ID
-from financial_intelligence_agent.live.chart_controls import window_controls,period_controls
+from financial_intelligence_agent.live.chart_controls import window_controls,period_controls,_browser_today
+from financial_intelligence_agent.live.fred_fallback import fetch_with_full_history_fallback
 from financial_intelligence_agent.live.date_ranges import Coverage,extend
 from financial_intelligence_agent.live.panels import fetch_bank_panel,contraction_breadth
 from financial_intelligence_agent.live.databricks_gold import read_gold,descriptors as gold_descriptors
@@ -226,6 +227,13 @@ def _load_fred():
     with st.expander("Metadata for indexed series"):
         render_fred_metadata(matches[:75])
     earliest=date(1776,1,1)
+    # Apply post-fetch date changes before the date_input widgets are created.
+    # Streamlit rejects changes to widget-owned keys later in the same run.
+    pending=st.session_state.pop("fred_pending_full_history_range",None)
+    if pending is not None and pending[0]==chosen["id"]:
+        st.session_state["fred_range_start"]=pending[1]
+        st.session_state["fred_range_end"]=pending[2]
+        st.session_state["fred_range_preset"]="ALL"
     has_loaded=(st.session_state.get("fred_last_result")==chosen["id"]
                 and chosen["id"] in _state())
     start,end=window_controls("fred_range",earliest=earliest,
@@ -233,8 +241,10 @@ def _load_fred():
     if st.button("Load FRED observations",type="primary",key="fred_load_observations"):
         try:
             with st.spinner("Loading FRED data; using the private server API key"):
-                found=_load_series_coverage(chosen["id"],start,end)
-                if found is None:raise ValueError("No data returned for the requested window")
+                found,display_start,display_end,used_full_history=fetch_with_full_history_fallback(
+                    chosen["id"],start,end,
+                    load=_load_series_coverage,history_start=_fred_first_date,
+                    today=_browser_today())
             descriptor=Descriptor(chosen["id"],chosen["label"],"FRED",
                 chosen["unit"],chosen["frequency"],chosen["category"],
                 chosen["source_url"],chosen["convention"])
@@ -242,9 +252,18 @@ def _load_fred():
                            frequency=descriptor.frequency)
             _add(chosen["id"],series,descriptor,found.retrieved_at,found.warning)
             st.session_state["fred_last_result"]=chosen["id"]
-            st.session_state["fred_loaded_range"]=(start,end)
-            st.session_state["fred_load_notice"]=f"Loaded {len(series.points):,} published observations"
-            st.rerun()  # Newly available chart controls appear on this same interaction.
+            st.session_state["fred_loaded_range"]=(display_start,display_end)
+            if used_full_history:
+                st.session_state["fred_pending_full_history_range"]=(
+                    chosen["id"],display_start,display_end)
+                st.session_state["fred_load_notice"]=(
+                    f"No observations between {start.isoformat()} and {end.isoformat()}. "
+                    f"Loaded {len(series.points):,} observations from the complete "
+                    f"available history instead.")
+            else:
+                st.session_state["fred_load_notice"]=(
+                    f"Loaded {len(series.points):,} published observations")
+            st.rerun()  # Make the revised range and toolbar visible together.
         except Exception as exc:st.error("FRED series request failed: "+str(exc))
     recent=st.session_state.get("fred_last_result")
     if recent==chosen["id"] and st.session_state.get("fred_load_notice"):

@@ -29,6 +29,21 @@ class Charts(unittest.TestCase):
         self.assertIn(b"2026-10-04",exported)
         self.assertIn(b"fingerprint",metadata_bytes({"SOFR":self.a},spec,unit,warnings))
         self.assertEqual(len(interactive_chart(df,spec,unit).data),2)
+    def test_visible_y_autoscale_does_not_include_outside_points(self):
+        from financial_intelligence_agent.live.charts import scale_y_to_visible
+        import plotly.graph_objects as go
+        from datetime import date
+        fig=go.Figure()
+        fig.add_trace(go.Scatter(x=["2026-05-01","2026-10-01","2026-10-02"],
+                                 y=[1000,1.0,1.2],name="levels"))
+        fig.add_trace(go.Bar(x=["2026-05-01","2026-10-01","2026-10-02"],
+                             y=[5000,30,32],name="volume",yaxis="y2"))
+        result=scale_y_to_visible(fig,date(2026,9,1),date(2026,10,15))
+        self.assertLess(result.layout.yaxis.range[1],2)
+        self.assertGreater(result.layout.yaxis.range[0],0)
+        self.assertLess(result.layout.yaxis2.range[1],40)
+        self.assertEqual(list(result.layout.xaxis.range),["2026-09-01","2026-10-15"])
+
     def test_preview_axis_tracks_data_not_zero(self):
         from financial_intelligence_agent.live.charts import preview_figure
         from financial_intelligence_agent.engine.operators import Series,Point

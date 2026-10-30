@@ -18,6 +18,9 @@ import json
 import re
 
 MAX_POINTS = 10000
+# Published daily FRED histories can span more than 10,000 observations.
+# Keep the stricter operator/upload limit; allow bounded FRED source histories.
+MAX_FRED_HISTORY_POINTS = 100000
 MAX_WINDOW = 1000
 MAX_STEPS = 40
 KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,95}$")
@@ -85,8 +88,9 @@ class Series:
         if self.frequency not in {"daily", "weekly", "monthly", "quarterly", "annual", "irregular"}:
             raise ValueError("Unsupported frequency")
         pts = tuple(self.points)
-        if not pts or len(pts) > MAX_POINTS:
-            raise ValueError("Series must contain 1..10000 observations")
+        limit = MAX_FRED_HISTORY_POINTS if self.source == "FRED" else MAX_POINTS
+        if not pts or len(pts) > limit:
+            raise ValueError(f"Series must contain 1..{limit} observations")
         if any(not isinstance(p, Point) for p in pts):
             raise ValueError("Points must be Point instances")
         unique = {(p.date, p.available_at, p.revision) for p in pts}

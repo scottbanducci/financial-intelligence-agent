@@ -137,8 +137,11 @@ def preview_figure(series:Series,label:str):
     # A constant series still needs a readable axis. For ordinary series
     # the axis should not extend all the way down to zero by default.
     padding=max(span*0.06,abs(high)*0.0005,abs(low)*0.0005,1e-9)
-    fig=go.Figure(go.Scatter(x=dates,y=values,name=label,mode="lines",
-                             connectgaps=False))
+    # WebGL prevents large full-history FRED previews from flooding the
+    # browser's SVG renderer with tens of thousands of line vertices.
+    trace=go.Scattergl if len(values)>10000 else go.Scatter
+    fig=go.Figure(trace(x=dates,y=values,name=label,mode="lines",
+                        connectgaps=False))
     fig.update_layout(
         template="plotly_dark",height=390,
         title=label,xaxis_title="Observation date",yaxis_title=series.unit,

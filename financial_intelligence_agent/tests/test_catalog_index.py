@@ -73,20 +73,59 @@ class CatalogIndexTests(unittest.TestCase):
         weekly=search(self.db,"reserve total weekly",provider="FRED",
                       release_id=401,include_discontinued=False)
         self.assertEqual([row["id"] for row in weekly],["FRED:WRESBAL"])
-        # Tokens may appear in any order and match across label, frequency,
-        # units, ID and release rather than only the original series title.
+        # Tokens may appear in any order and match across the individual
+        # series title, ID, frequency and units. Release names only filter.
         self.assertEqual([x["id"] for x in search(
             self.db,"weekly total reserve",provider="FRED",release_id=401)],
             ["FRED:WRESBAL"])
         self.assertEqual([x["id"] for x in search(
-            self.db,"h.4.1 reserve millions weekly",provider="FRED")],
+            self.db,"reserve millions weekly",provider="FRED",release_id=401)],
             ["FRED:WRESBAL"])
+        self.assertEqual(search(self.db,"h.4.1",provider="FRED",release_id=401),[])
         self.assertEqual([x["id"] for x in search(
             self.db,"wresbal millions",provider="FRED")],
             ["FRED:WRESBAL"])
         self.assertEqual([x["id"] for x in search(
             self.db,"total monthly billions",provider="FRED",release_id=401)],
             ["FRED:MRESBAL"])
+
+    def test_release_name_cannot_satisfy_reserve_balance_query(self):
+        from financial_intelligence_agent.live.catalog_index import put_entry
+        rid=402
+        self.db.execute(
+            "INSERT INTO fred_releases(release_id,name) VALUES "
+            "(402,'H.4.1 Factors Affecting Reserve Balances')")
+        samples=(
+            ("MATCH","Reserve Balances, Total","weekly","Millions of USD",
+             "FRED release series"),
+            ("UNRELATED","Treasury Securities Held, Total","weekly","Millions of USD",
+             "FRED release series"),
+            ("RESERVE","Reserve Deposit Accounts","weekly","Millions of USD",
+             "FRED release series"),
+            ("BALANCE","Total Bank Balances","weekly","Millions of USD",
+             "FRED release series"),
+            ("CATEGORY","Balances in Commercial Banks","weekly","Millions of USD",
+             "Federal Reserve reporting"),
+            ("MONTHLY","Reserve Balances, Total","monthly","Millions of USD",
+             "FRED release series"),
+        )
+        for sid,label,frequency,unit,category in samples:
+            put_entry(self.db,Descriptor(
+                "FRED:"+sid,label,"FRED",unit,frequency,category,
+                "https://fred.stlouisfed.org/series/"+sid,"FRED_realtime_vintage"))
+            self.db.execute(
+                "INSERT INTO fred_release_members(release_id,series_id) VALUES(?,?)",
+                (rid,"FRED:"+sid))
+        self.db.commit()
+        rows=search(self.db,"reserve balance weekly",provider="FRED",
+                    release_id=rid)
+        self.assertEqual([row["id"] for row in rows],["FRED:MATCH"])
+        self.assertEqual([row["id"] for row in search(
+            self.db,"balance reserve weekly",provider="FRED",release_id=rid)],
+            ["FRED:MATCH"])
+        self.assertEqual(len(search(self.db,"",provider="FRED",release_id=rid)),
+                         len(samples))
+        self.assertEqual(search(self.db,"h.4.1",provider="FRED",release_id=rid),[])
 
     def test_unlimited_series_search_includes_beyond_old_150_and_250_caps(self):
         from financial_intelligence_agent.live.catalog_index import put_entry
@@ -146,7 +185,8 @@ class CatalogIndexTests(unittest.TestCase):
         self.assertEqual(result["state"]["fred_complete"],"true")
         self.assertEqual(result["fred_releases"]["done"],2)
         self.assertEqual(len(release_list(self.db)),2)
-        self.assertEqual(len(search(self.db,"H.8",provider="FRED")),2)
+        self.assertEqual(len(search(self.db,"H.8",provider="FRED")),0)
+        # H.8 is a release-selection criterion, not a series search term.
         self.assertEqual(len(search(self.db,"assets",provider="FRED")),1)
         self.assertEqual(len(search(self.db,"",provider="FRED",release_id=22)),2)
         self.assertEqual(len(calls),4)

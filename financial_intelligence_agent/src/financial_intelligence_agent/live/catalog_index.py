@@ -219,12 +219,11 @@ def crawl_fred(db:sqlite3.Connection,api_key:str, *,
 def search(db:sqlite3.Connection,term:str,*,provider:str|None=None,
            release_id:int|None=None,limit:int|None=None,
            include_discontinued:bool=True)->list[dict]:
-    """Search across every field visible in the series selector.
+    """Match series metadata, with a release acting only as a filter.
 
-    Each whitespace-separated word may match a different metadata field,
-    in any order. The default returns all matching indexed series, not an
-    arbitrarily truncated list. Callers displaying large providers should
-    ask for a search term or a release before rendering all rows in a widget.
+    Each word can match a different series field (name, ID, frequency,
+    units or category), in any order. Release names do not satisfy search
+    terms. The default returns all matching indexed series, without a cap.
     """
     if not isinstance(term,str) or len(term)>140:raise ValueError("Search exceeds 140 characters")
     if provider is not None and provider not in {"FRED","NYFED_DATASET","NYFED_PD"}:
@@ -235,7 +234,6 @@ def search(db:sqlite3.Connection,term:str,*,provider:str|None=None,
     sql="""SELECT DISTINCT e.id,e.label,e.provider,e.unit,e.frequency,e.category,
                    e.source_url,e.convention,e.kind,e.endpoint FROM entries e
                    LEFT JOIN fred_release_members m ON m.series_id=e.id
-                   LEFT JOIN fred_releases r ON r.release_id=m.release_id
                    WHERE 1=1"""
     args=[]
     if provider is not None:
@@ -248,8 +246,8 @@ def search(db:sqlite3.Connection,term:str,*,provider:str|None=None,
     for word in words:
         sql+=" AND (instr(lower(e.id),?)>0 OR instr(lower(e.label),?)>0"
         sql+=" OR instr(lower(e.frequency),?)>0 OR instr(lower(e.unit),?)>0"
-        sql+=" OR instr(lower(e.category),?)>0 OR instr(lower(coalesce(r.name,'')),?)>0)"
-        args.extend([word]*6)
+        sql+=" OR instr(lower(e.category),?)>0)"
+        args.extend([word]*5)
     sql+=" ORDER BY e.label,e.id"
     if limit is not None:
         sql+=" LIMIT ?"

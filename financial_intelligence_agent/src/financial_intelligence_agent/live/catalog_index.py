@@ -217,13 +217,20 @@ def crawl_fred(db:sqlite3.Connection,api_key:str, *,
 
 
 def search(db:sqlite3.Connection,term:str,*,provider:str|None=None,
-           release_id:int|None=None,limit:int=150,
+           release_id:int|None=None,limit:int|None=None,
            include_discontinued:bool=True)->list[dict]:
-    """Local provider-scoped, release-aware search of named datasets."""
+    """Search across every field visible in the series selector.
+
+    Each whitespace-separated word may match a different metadata field,
+    in any order. The default returns all matching indexed series, not an
+    arbitrarily truncated list. Callers displaying large providers should
+    ask for a search term or a release before rendering all rows in a widget.
+    """
     if not isinstance(term,str) or len(term)>140:raise ValueError("Search exceeds 140 characters")
     if provider is not None and provider not in {"FRED","NYFED_DATASET","NYFED_PD"}:
         raise ValueError("Unknown search provider")
-    if type(limit) is not int or not 1<=limit<=250:raise ValueError("Limit must be 1..250")
+    if limit is not None and (type(limit) is not int or limit<1):
+        raise ValueError("Limit must be a positive integer or None")
     words=term.casefold().strip().split()
     sql="""SELECT DISTINCT e.id,e.label,e.provider,e.unit,e.frequency,e.category,
                    e.source_url,e.convention,e.kind,e.endpoint FROM entries e
@@ -233,17 +240,20 @@ def search(db:sqlite3.Connection,term:str,*,provider:str|None=None,
     args=[]
     if provider is not None:
         sql+=" AND e.provider=?";args.append(provider)
-    # Filter in SQL, before LIMIT. Filtering the returned 150 records would
-    # otherwise hide active series when discontinued matches dominate.
+    # Apply discontinued filtering before an optional caller-specified limit.
     if provider=="FRED" and not include_discontinued:
         sql+=" AND instr(lower(e.label),'(discontinued)')=0"
     if release_id is not None:
         sql+=" AND m.release_id=?";args.append(release_id)
     for word in words:
-        sql+=" AND (instr(lower(e.id),?)>0 OR instr(lower(e.label),?)>0 OR instr(lower(e.category),?)>0 OR instr(lower(coalesce(r.name,'')),?)>0)"
-        args.extend([word]*4)
-    sql+=" ORDER BY e.label LIMIT ?"
-    args.append(limit)
+        sql+=" AND (instr(lower(e.id),?)>0 OR instr(lower(e.label),?)>0"
+        sql+=" OR instr(lower(e.frequency),?)>0 OR instr(lower(e.unit),?)>0"
+        sql+=" OR instr(lower(e.category),?)>0 OR instr(lower(coalesce(r.name,'')),?)>0)"
+        args.extend([word]*6)
+    sql+=" ORDER BY e.label,e.id"
+    if limit is not None:
+        sql+=" LIMIT ?"
+        args.append(limit)
     result=db.execute(sql,args).fetchall()
     keys=("id","label","provider","unit","frequency","category","source_url","convention","kind","endpoint")
     return [dict(zip(keys,row)) for row in result]
@@ -326,7 +336,6 @@ def bootstrap(path:str|Path=DB_DEFAULT,*,enable_network:bool=True)->dict:
 
 
 def lookup(db:sqlite3.Connection,key:str)->dict|None:
-    rows=search(db,"",limit=250)
     r=db.execute("""SELECT id,label,provider,unit,frequency,category,source_url,
                     convention,kind,endpoint FROM entries WHERE id=?""",(key,)).fetchone()
     if not r:return None

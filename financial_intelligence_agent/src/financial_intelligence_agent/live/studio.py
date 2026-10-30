@@ -213,7 +213,7 @@ def _load_fred():
     if len(matches)==150:st.caption("Showing the first 150 matches. Refine your search to narrow the results.")
     with st.expander("Metadata for indexed series"):
         render_fred_metadata(matches[:75])
-    earliest=date(1800,1,1)
+    earliest=date(1776,1,1)
     start,end=window_controls("fred_range",earliest=earliest)
     if st.button("Load FRED observations",type="primary",key="fred_load_observations"):
         try:

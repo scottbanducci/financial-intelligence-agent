@@ -35,8 +35,12 @@ def window_controls(prefix:str,*,earliest:date,show_dates:bool=True)->tuple[date
                          on_change=_select_preset,args=(prefix,earliest))
     if show_dates:
         a,b=st.columns(2)
-        start=a.date_input("From",key=prefix+"_start",on_change=_manual_window,args=(prefix,))
-        end=b.date_input("Through",key=prefix+"_end",on_change=_manual_window,args=(prefix,))
+        start=a.date_input("From",key=prefix+"_start",
+                           min_value=date(1600,1,1),max_value=today,
+                           on_change=_manual_window,args=(prefix,))
+        end=b.date_input("Through",key=prefix+"_end",
+                         min_value=date(1600,1,1),max_value=today,
+                         on_change=_manual_window,args=(prefix,))
     else:
         start=st.session_state[prefix+"_start"]
         end=st.session_state[prefix+"_end"]

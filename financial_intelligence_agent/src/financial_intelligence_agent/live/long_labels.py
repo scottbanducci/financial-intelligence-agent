@@ -66,14 +66,64 @@ _SCROLL_STYLE = r"""
 /* Streamlit 1.59+ uses React Aria and renders the dropdown at document
    scope. The listbox aria-label identifies only our "Series" options.
    Keep overflow scrollable instead of truncating its inner text. */
-[role="listbox"][aria-label="Series"] [role="option"] [data-item-hl] {
+[role="listbox"] [role="option"] [data-item-hl] {
     overflow-x: auto !important;
     overflow-y: hidden !important;
     scrollbar-width: none !important;
     -ms-overflow-style: none !important;
 }
-[role="listbox"][aria-label="Series"] [role="option"] [data-item-hl]::-webkit-scrollbar {
+[role="listbox"] [role="option"] [data-item-hl]::-webkit-scrollbar {
     display: none;
+}
+
+/* All dataset inventory tables, including Workspace and Data Catalog. */
+.dataset-table-wrap {
+    max-height: 370px;
+    overflow: auto;
+    border: 1px solid rgba(127,137,151,.28);
+    border-radius: 8px;
+}
+.dataset-table {
+    border-collapse: collapse;
+    width: 100%;
+    table-layout: fixed;
+    font-size: .84rem;
+    color: inherit;
+}
+.dataset-table th, .dataset-table td {
+    border-bottom: 1px solid rgba(127,137,151,.18);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: middle;
+}
+.dataset-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--secondary-background-color,#1c2330);
+}
+.dataset-label-viewport {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.dataset-label-viewport::-webkit-scrollbar { display:none; }
+.dataset-label-text { display:inline-block; min-width:100%; width:max-content; }
+.dataset-label-viewport:hover, .dataset-label-viewport:focus-visible {
+    outline: 1px solid var(--primary-color,#66c8d0);
+    outline-offset:2px;
+}
+/* Horizontal reveal on selected dataset text and chips, not just options. */
+[data-testid="stSelectbox"] input {
+    text-overflow: clip !important;
+}
+[data-testid="stMultiSelect"] [data-baseweb="tag"] {
+    max-width: 100%;
+    min-width: 0;
 }
 </style>
 """
@@ -84,8 +134,8 @@ _SCROLL_STYLE = r"""
 _SCROLL_SCRIPT = r"""
 <script>
 (function () {
-  if (window.__fredLongLabelScrollInstalled) return;
-  window.__fredLongLabelScrollInstalled = true;
+  if (window.__datasetLongLabelScrollInstalled) return;
+  window.__datasetLongLabelScrollInstalled = true;
 
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   let active = null;
@@ -104,13 +154,22 @@ _SCROLL_SCRIPT = r"""
     if (!(node instanceof Element)) return null;
     // Source table cells may lose CSS :hover while Streamlit recomputes
     // layout; continue their scrolling until complete even if that occurs.
-    const tableCell = node.closest(".fred-label-viewport");
+    const tableCell = node.closest(".fred-label-viewport, .dataset-label-viewport");
     if (tableCell) return tableCell;
     const option = node.closest('[role="option"]');
-    if (!option) return null;
-    const listbox = option.closest('[role="listbox"][aria-label="Series"]');
-    if (!listbox) return null;
-    return option.querySelector("[data-item-hl]");
+    if (option && option.closest('[role="listbox"]')) {
+      return option.querySelector("[data-item-hl]") || option;
+    }
+    // The selected display of st.selectbox is an input. Keep search and
+    // password fields untouched, and never animate an actively edited input.
+    const selected = node.closest('[data-testid="stSelectbox"] input');
+    if (selected && document.activeElement !== selected) return selected;
+    // MultiSelect selected tags can truncate dataset keys.
+    const tag = node.closest('[data-testid="stMultiSelect"] [data-baseweb="tag"]');
+    if (tag) {
+      return tag.querySelector('span') || tag;
+    }
+    return null;
   }
 
   function start(target) {
@@ -133,7 +192,8 @@ _SCROLL_SCRIPT = r"""
         if (progress < 1) animation = window.requestAnimationFrame(step);
         else {
           animation = null;
-          if (target.classList.contains("fred-label-viewport")) {
+          if (target.classList.contains("fred-label-viewport") ||
+              target.classList.contains("dataset-label-viewport")) {
             // Reset shortly after finishing, unless the reader moved to
             // another label. The animation is never tied to network state.
             window.setTimeout(() => {
@@ -153,7 +213,8 @@ _SCROLL_SCRIPT = r"""
     if (!active) return;
     const current = viewportFrom(event.target);
     if (current !== active) return;
-    if (active.classList.contains("fred-label-viewport")) {
+    if (active.classList.contains("fred-label-viewport") ||
+        active.classList.contains("dataset-label-viewport")) {
       // Text/canvas overlays can emit a synthetic pointerout while the user
       // is still reading. Keep the table cell's scroll in progress.
       return;
@@ -167,10 +228,15 @@ _SCROLL_SCRIPT = r"""
 """
 
 
-def install_fred_label_scrolling() -> None:
-    """Install CSS and a static, delegated browser hover handler."""
+def install_dataset_label_scrolling() -> None:
+    """Install the single app-wide CSS and static delegated hover handler."""
     st.html(_SCROLL_STYLE)
     st.html(_SCROLL_SCRIPT, unsafe_allow_javascript=True)
+
+
+def install_fred_label_scrolling() -> None:
+    """Backward-compatible alias for the FRED metadata view."""
+    install_dataset_label_scrolling()
 
 
 def metadata_html(rows: Sequence[Mapping[str, object]]) -> str:
@@ -210,3 +276,55 @@ def metadata_html(rows: Sequence[Mapping[str, object]]) -> str:
 
 def render_fred_metadata(rows: Sequence[Mapping[str, object]]) -> None:
     st.html(metadata_html(rows))
+
+
+def dataset_table_html(
+    rows: Sequence[Mapping[str, object]],
+    columns: Sequence[str],
+    *,
+    max_rows: int = 150,
+    height: int = 370,
+) -> str:
+    """Build a readable, escaped inventory table with all text cells scrollable.
+
+    This is for dataset catalogs / metadata, not numeric observation
+    spreadsheets, where the native sortable data grid is retained.
+    """
+    if not 1 <= max_rows <= 500:
+        raise ValueError("Dataset table max_rows must be 1..500")
+    if not 100 <= height <= 1000:
+        raise ValueError("Dataset table height must be 100..1000")
+    safe_columns=[str(c) for c in columns]
+    out=[f'<div class="dataset-table-wrap" style="max-height:{height}px">',
+         '<table class="dataset-table"><thead><tr>']
+    for col in safe_columns:
+        out.append(f'<th scope="col">{escape(col,quote=True)}</th>')
+    out.append('</tr></thead><tbody>')
+    for record in rows[:max_rows]:
+        out.append('<tr>')
+        for column in safe_columns:
+            raw=record.get(column,"")
+            if raw is None:
+                raw=""
+            # Protect source titles, URLs, derived names, and cell data.
+            value=escape(str(raw),quote=True)
+            out.append(
+                '<td><div class="dataset-label-viewport" tabindex="0" '
+                'aria-label="' + value + '">'
+                '<span class="dataset-label-text">' + value + '</span>'
+                '</div></td>'
+            )
+        out.append('</tr>')
+    out.append('</tbody></table></div>')
+    return "".join(out)
+
+
+def render_dataset_table(
+    rows: Sequence[Mapping[str, object]],
+    columns: Sequence[str],
+    *,
+    max_rows: int = 150,
+    height: int = 370,
+) -> None:
+    """Render dataset metadata with hover-revealed values in every column."""
+    st.html(dataset_table_html(rows,columns,max_rows=max_rows,height=height))

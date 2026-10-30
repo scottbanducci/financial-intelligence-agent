@@ -202,6 +202,12 @@ def main():
                     headX:el.data[0]?.x?.[0],
                     headY:el.data[0]?.y?.[0],
                     count:el.data.length,
+                    handlerInstalled:window.__analystVisibleYAutoscaleInstalled,
+                    calcCount:el.calcdata?.length,
+                    calcFirst:(el.calcdata?.[0]||[]).slice(0,3).map(p=>({
+                        keys:Object.keys(p).slice(0,18),x:p.x,y:p.y,s:p.s
+                    })),
+                    encodedY:el.data?.[0]?.y && Object.keys(el.data[0].y).slice(0,10),
                     btn:!!el.querySelector('.modebar-btn[data-title="Autoscale"]')
                 })"""),flush=True)
                 before=gd.evaluate("el => ({x:el._fullLayout.xaxis.range.slice(), y:el._fullLayout.yaxis.range.slice()})")

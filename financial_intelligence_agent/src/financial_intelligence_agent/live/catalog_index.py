@@ -221,9 +221,10 @@ def search(db:sqlite3.Connection,term:str,*,provider:str|None=None,
            include_discontinued:bool=True)->list[dict]:
     """Match series metadata, with a release acting only as a filter.
 
-    Each word can match a different series field (name, ID, frequency,
-    units or category), in any order. Release names do not satisfy search
-    terms. The default returns all matching indexed series, without a cap.
+    For FRED, each word must match a series name, ID, frequency or unit,
+    in any order. A release only scopes membership: neither its title nor
+    internal category labels satisfy search terms. Other providers retain
+    category search. Results are not capped by default.
     """
     if not isinstance(term,str) or len(term)>140:raise ValueError("Search exceeds 140 characters")
     if provider is not None and provider not in {"FRED","NYFED_DATASET","NYFED_PD"}:
@@ -246,7 +247,7 @@ def search(db:sqlite3.Connection,term:str,*,provider:str|None=None,
     for word in words:
         sql+=" AND (instr(lower(e.id),?)>0 OR instr(lower(e.label),?)>0"
         sql+=" OR instr(lower(e.frequency),?)>0 OR instr(lower(e.unit),?)>0"
-        sql+=" OR instr(lower(e.category),?)>0)"
+        sql+=" OR (e.provider!='FRED' AND instr(lower(e.category),?)>0))"
         args.extend([word]*5)
     sql+=" ORDER BY e.label,e.id"
     if limit is not None:

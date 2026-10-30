@@ -17,6 +17,8 @@ import streamlit as st
 from financial_intelligence_agent.live.catalog_index import get_connection,search as catalog_search,status as catalog_status,release_list
 from financial_intelligence_agent.live.long_labels import render_fred_metadata,render_dataset_table
 from financial_intelligence_agent.live.nyfed_datasets import fetch_dataset,BY_ID
+from financial_intelligence_agent.live.chart_controls import window_controls
+from financial_intelligence_agent.live.date_ranges import Coverage,extend
 from financial_intelligence_agent.live.panels import fetch_bank_panel,contraction_breadth
 from financial_intelligence_agent.live.databricks_gold import read_gold,descriptors as gold_descriptors
 from financial_intelligence_agent.live.fdic import bank_financial,FIELDS
@@ -50,6 +52,79 @@ def _add(key:str,series:Series,descriptor:Descriptor,retrieved:str="",warnings:s
         series=replace(series,key=key)
     _state()[key]={"series":series,"descriptor":descriptor,
                    "retrieved":retrieved,"warning":warnings}
+
+def _clip_series(series:Series,start:date,end:date)->Series:
+    return replace(series,points=tuple(p for p in series.points if start<=p.date<=end))
+
+def _merge_series(old:Series|None,new:Series)->Series:
+    if old is None:return new
+    if (old.unit,old.frequency,old.source)!=(new.unit,new.frequency,new.source):
+        raise ValueError("Source series metadata changed during incremental fetch")
+    points={p.date:p for p in old.points}
+    points.update({p.date:p for p in new.points})
+    return replace(old,points=tuple(points[d] for d in sorted(points)))
+
+def _merge_result(old,new):
+    return replace(new,series=_merge_series(old.series if old else None,new.series))
+
+def _load_series_coverage(key:str,start:date,end:date,*,batch_days:int=3650):
+    catalog=st.session_state.setdefault("publisher_range_cache",{})
+    cache=catalog.setdefault(key,Coverage([]))
+    def reader(a,b):
+        try:return _cached_fetch(key,a.isoformat(),b.isoformat())
+        except ValueError as exc:
+            if "No numeric observations in the selected period" in str(exc):return None
+            raise
+    extend(cache,start,end,reader,_merge_result,batch_days=batch_days,max_calls=80)
+    return cache.result
+
+def _merge_ny_result(old,new):
+    if old is None:return new
+    if old.definition.id!=new.definition.id:raise ValueError("NY Fed family changed")
+    series=dict(old.series)
+    volume=dict(old.volume)
+    for name,val in new.series.items():
+        series[name]=_merge_series(series.get(name),val)
+    for name,val in new.volume.items():
+        volume[name]=_merge_series(volume.get(name),val)
+    daily={(r["observation_date"],r["series"]):r for r in old.daily}
+    daily.update({(r["observation_date"],r["series"]):r for r in new.daily})
+    # Publisher operation records may have no stable unique ID; coverage
+    # batches do not overlap and therefore preserve source rows verbatim.
+    return replace(new,series=series,volume=volume,
+                   daily=tuple(daily[k] for k in sorted(daily)),
+                   detail=old.detail+new.detail,
+                   warnings=tuple(dict.fromkeys(old.warnings+new.warnings)))
+
+def _clip_ny_result(result,start:date,end:date):
+    from financial_intelligence_agent.live.nyfed_datasets import _date
+    def filter_series(s):return _clip_series(s,start,end)
+    return replace(result,
+      series={k:filter_series(v) for k,v in result.series.items()
+              if any(start<=p.date<=end for p in v.points)},
+      volume={k:filter_series(v) for k,v in result.volume.items()
+              if any(start<=p.date<=end for p in v.points)},
+      daily=tuple(r for r in result.daily
+                  if start<=date.fromisoformat(r["observation_date"])<=end),
+      detail=tuple(r for r in result.detail
+                   if start<=_date(r,result.definition.mode)<=end))
+
+def _load_ny_coverage(dataset_id:str,start:date,end:date):
+    cache=st.session_state.setdefault("publisher_range_cache",{}).setdefault(
+        dataset_id,Coverage([]))
+    # Operations responses are capped by row/byte limits; smaller batches
+    # avoid huge downloads even for 10Y/ALL.
+    mode=BY_ID[dataset_id].mode
+    days=180 if mode in ("operations","repo","treasury","swaps") else 365
+    def reader(a,b):
+        try:return _fetch_ny_dataset(dataset_id,a.isoformat(),b.isoformat())
+        except ValueError as exc:
+            if "No publisher observations for selected date range" in str(exc):
+                return None
+            raise
+    extend(cache,start,end,reader,_merge_ny_result,batch_days=days,max_calls=90)
+    return cache.result
+
 
 def _publication_buttons(frame:pd.DataFrame,spec:ChartSpec,unit:str,
                          chosen:dict[str,Series],warnings:list[str],*,prefix:str)->None:
@@ -121,10 +196,8 @@ def _load_fred():
         key="fred_release_selected")
     query=st.text_input("Search FRED series by name, identifier or release",
         placeholder="e.g. H.8, commercial bank credit, SOFR",key="fred_series_search")
-    series_col,toggle_col=st.columns([4,2],vertical_alignment="bottom")
-    with toggle_col:
-        include_discontinued=st.toggle("Include discontinued series",value=False,
-                                       key="fred_include_discontinued")
+
+    include_discontinued=st.session_state.get("fred_include_discontinued",False)
     with closing(get_connection()) as db:
         matches=catalog_search(db,query,provider="FRED",
             release_id=selected_release["id"] if selected_release is not None else None,
@@ -133,20 +206,20 @@ def _load_fred():
         st.info("No matching series in the indexed catalog. Try enabling discontinued series, "
                 "refining your search, or allowing the release crawl to finish.")
         return
-    with series_col:
-        chosen=st.selectbox("Series",matches,
-            format_func=lambda item:f'{item["label"]} · {item["id"][5:]} ({item["frequency"]}, {item["unit"]})',
-            key="fred_series_item")
+    chosen=st.selectbox("Series",matches,
+        format_func=lambda item:f'{item["label"]} · {item["id"][5:]} ({item["frequency"]}, {item["unit"]})',
+        key="fred_series_item")
+    st.toggle("Include discontinued series",value=False,key="fred_include_discontinued")
     if len(matches)==150:st.caption("Showing the first 150 matches. Refine your search to narrow the results.")
     with st.expander("Metadata for indexed series"):
         render_fred_metadata(matches[:75])
-    a,b=st.columns(2)
-    start=a.date_input("From",date.today()-timedelta(days=365*4),key="fred_range_start")
-    end=b.date_input("Through",date.today(),key="fred_range_end")
+    earliest=date(1800,1,1) if st.session_state.get("fred_range_preset")=="ALL" else date(1900,1,1)
+    start,end=window_controls("fred_range",earliest=earliest)
     if st.button("Load FRED observations",type="primary",key="fred_load_observations"):
         try:
             with st.spinner("Loading FRED data; using the private server API key"):
-                found=_cached_fetch(chosen["id"],start.isoformat(),end.isoformat())
+                found=_load_series_coverage(chosen["id"],start,end)
+                if found is None:raise ValueError("No data returned for the requested window")
             descriptor=Descriptor(chosen["id"],chosen["label"],"FRED",
                 chosen["unit"],chosen["frequency"],chosen["category"],
                 chosen["source_url"],chosen["convention"])
@@ -157,8 +230,23 @@ def _load_fred():
             st.success(f"Loaded {len(series.points):,} published observations")
         except Exception as exc:st.error("FRED series request failed: "+str(exc))
     recent=st.session_state.get("fred_last_result")
-    if recent in _state():
-        series=_state()[recent]["series"]
+    if recent==chosen["id"] and recent in _state():
+        # A preset change only fetches uncovered dates. Shortening a window
+        # uses cached history without another publisher call.
+        if st.session_state.get("fred_loaded_range")!=(start,end):
+            try:
+                found=_load_series_coverage(recent,start,end)
+                if found is not None:
+                    info=_state()[recent]
+                    _add(recent,replace(found.series,key=recent,
+                        frequency=info["descriptor"].frequency,unit=info["descriptor"].unit),
+                        info["descriptor"],found.retrieved_at,found.warning)
+                    st.session_state["fred_loaded_range"]=(start,end)
+            except Exception as exc:st.warning("Additional FRED history unavailable: "+str(exc))
+        series=_clip_series(_state()[recent]["series"],start,end)
+        if not series.points:
+            st.info("No observations in this chart range. Choose a longer period.")
+            return
         frame=pd.DataFrame([{"date":p.date,"value":float(p.value) if p.value is not None else None}
                             for p in series.points]).set_index("date")
         label=_state()[recent]["descriptor"].label
@@ -247,18 +335,21 @@ def _load_nyfed():
     if not matches:
         st.info("No matching data product. Check spelling or wait for primary-dealer metadata to finish.")
         return
-    choice=st.selectbox("Dataset to chart",matches,
-        format_func=lambda x:f'{x["label"]} · {x["provider"]} [{x["id"]}]',
+    choice=st.selectbox("Dataset",matches,
+        format_func=lambda x:x["label"],
         key="nyfed_selected_dataset")
-    a,b=st.columns(2)
-    start=a.date_input("From",date.today()-timedelta(days=365),key="nyfed_range_start")
-    end=b.date_input("Through",date.today(),key="nyfed_range_end")
+    # ALL uses the supported publisher-history horizon. Older NY Fed
+    # records can be sourced separately where published by the issuer.
+    ny_first=date(1986,1,1) if choice["provider"]=="NYFED_PD" else date(2000,1,1)
+    start,end=window_controls("nyfed_range",earliest=ny_first)
     if st.button("Load NY Fed dataset",key="nyfed_fetch_dataset",type="primary"):
         try:
             if choice["provider"]=="NYFED_PD":
                 from financial_intelligence_agent.live.providers import dealer
-                result=dealer(choice["id"][len("NYFED_PD:"):],
-                    start.isoformat(),end.isoformat())
+                # Dealer endpoint returns full history on every request;
+                # cache the complete record once, then use local date filtering.
+                result=_load_series_coverage(choice["id"],start,end,batch_days=3650)
+                if result is None:raise ValueError("No dealer observations in this period")
                 descriptor=Descriptor(choice["id"],choice["label"],"NYFED_PD",
                       choice["unit"],choice["frequency"],choice["category"],
                       choice["source_url"],choice["convention"])
@@ -266,7 +357,8 @@ def _load_nyfed():
                 _add(choice["id"],series,descriptor,result.retrieved_at,result.warning)
                 st.session_state["nyfed_loaded"]={"kind":"dealer","id":choice["id"]}
             else:
-                result=_fetch_ny_dataset(choice["id"],start.isoformat(),end.isoformat())
+                result=_load_ny_coverage(choice["id"],start,end)
+                if result is None:raise ValueError("No NY Fed data in this period")
                 for name,series in result.series.items():
                     desc=Descriptor(series.key,choice["label"]+" · "+name,"NYFED",
                         result.units[name],"daily",choice["category"],
@@ -281,7 +373,7 @@ def _load_nyfed():
                          "NY Fed published volume, billions of USD")
                 st.session_state["nyfed_loaded"]={"kind":"product","id":choice["id"],
                                                    "result":result}
-            st.success("Publisher observations loaded and available in the Chart Designer below.")
+            st.success("Publisher observations loaded and available in Data transformations.")
         except Exception as exc:
             st.error("NY Fed request rejected: "+str(exc))
             st.session_state.pop("nyfed_loaded",None)
@@ -291,9 +383,21 @@ def _load_nyfed():
         st.info("Select Load NY Fed dataset to update the chart to the current dataset.")
         return
     if loaded["kind"]=="dealer":
+        if st.session_state.get("nyfed_loaded_range")!=(start,end):
+            try:
+                refreshed=_load_series_coverage(choice["id"],start,end,batch_days=3650)
+                if refreshed is not None:
+                    info=_state().get(choice["id"])
+                    if info:
+                        _add(choice["id"],replace(refreshed.series,key=choice["id"]),
+                             info["descriptor"],refreshed.retrieved_at,refreshed.warning)
+                        st.session_state["nyfed_loaded_range"]=(start,end)
+            except Exception as exc:st.warning("Additional dealer history unavailable: "+str(exc))
         item=_state().get(loaded["id"])
         if item is None:return
-        series=item["series"]
+        series=_clip_series(item["series"],start,end)
+        if not series.points:
+            st.info("No dealer observations in this period.");return
         frame=pd.DataFrame([{"Date":p.date,"Value":float(p.value)} for p in series.points])
         st.plotly_chart(preview_figure(series,item["descriptor"].label),
                         use_container_width=True,theme=None,key="nydealer_preview")
@@ -305,7 +409,16 @@ def _load_nyfed():
             frame.to_csv(index=False).encode("utf-8-sig"),"nyfed-dealer-series.csv",
             mime="text/csv",key="nydealer_csv")
         return
-    result=loaded["result"]
+    try:
+        full_result=_load_ny_coverage(choice["id"],start,end)
+        if full_result is None:
+            st.info("No NY Fed observations in this period.");return
+        result=_clip_ny_result(full_result,start,end)
+    except Exception as exc:
+        st.warning("Additional NY Fed history unavailable: "+str(exc))
+        result=_clip_ny_result(loaded["result"],start,end)
+    if not result.series:
+        st.info("No observations in the selected chart window.");return
     st.caption("Publisher source: "+result.source_url)
     _show_ny_chart(result)
     for note in result.warnings:st.caption(note)
@@ -647,11 +760,11 @@ def _chart_builder():
                             max_selections=12,key="plot_selection",
                             format_func=lambda key:f"{ws[key]['descriptor'].label} [{key}]")
     if not selected:return
-    x,y,z=st.columns(3)
+    x,y=st.columns(2)
     mode=x.selectbox("Scale and normalization",MODES,key="plot_mode")
     style=y.selectbox("Chart type",STYLES,key="plot_style")
-    start=z.date_input("Start",date.today()-timedelta(days=365*3),key="plot_start")
-    end=z.date_input("End",date.today(),key="plot_end")
+    oldest=min(p.date for key in selected for p in ws[key]["series"].points)
+    start,end=window_controls("plot_range",earliest=oldest)
     heading=st.text_input("Publication chart title","Financial conditions comparison")
     subtitle=st.text_input("Subtitle","Observed time series · verify reported units and dates")
     chosen={name:ws[name]["series"] for name in selected}

@@ -21,6 +21,7 @@ from financial_intelligence_agent.engine.operators import Point,Series,execute,O
 from financial_intelligence_agent.engine.ml import ALGORITHMS,REGRESSORS,make_supervised,walk_forward
 from financial_intelligence_agent.agent.operator_planner import AnalyticalService
 from financial_intelligence_agent.live.studio import render as live_studio, render_transformations
+from financial_intelligence_agent.live.chart_controls import window_controls
 import json
 
 st.set_page_config(page_title="Market Liquidity | Research Workbench",layout="wide",page_icon="◈")
@@ -129,7 +130,12 @@ elif page=="Funding desk":
     df=pd.DataFrame({"Date":[p.date for p in r["sofr"].points]})
     for k,v in r.items():
         df[k.upper()]=[float(p.value) if p.value is not None else None for p in v.points]
-    st.line_chart(df.set_index("Date"),y_label="Percent")
+    from_date,to_date=window_controls("funding_range",earliest=min(df["Date"]))
+    visible=df[(df["Date"]>=from_date)&(df["Date"]<=to_date)]
+    if not visible.empty:
+        st.line_chart(visible.set_index("Date"),y_label="Percent")
+    else:
+        st.info("No historical rate observations in the selected chart range.")
     days=st.slider("Window (calendar days)",7,90,30)
     result=engine.invoke("get_funding_conditions",lookback_days=days)
     st.markdown(engine.answer("SOFR compared to IORB",lookback_days=days)["report"])
@@ -161,7 +167,13 @@ elif page=="Operator lab":
             output=execute(op,*inputs,window=int(window))
             plotted=pd.DataFrame([{"Date":p.date,"Value":float(p.value) if p.value is not None else None}
                                   for p in output.points]).set_index("Date")
-            st.line_chart(plotted,y_label=output.unit)
+            earliest=min(p.date for p in output.points)
+            chart_start,chart_end=window_controls("operator_lab_range",earliest=earliest)
+            visible=plotted.loc[(plotted.index>=chart_start)&(plotted.index<=chart_end)]
+            if not visible.empty:
+                st.line_chart(visible,y_label=output.unit)
+            else:
+                st.info("No operator observations in the selected chart range.")
             st.caption("Observation-count windows, exact date matching, null-on-invalid arithmetic.")
             st.dataframe(plotted.tail(20),use_container_width=True)
             with st.expander("Input fingerprints and operation trace"):st.json({"lineage":output.lineage,"unit":output.unit,"operator":op})

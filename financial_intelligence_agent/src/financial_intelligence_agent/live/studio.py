@@ -653,6 +653,12 @@ def _operators():
     if latest in ws:
         series=ws[latest]["series"]
         st.markdown("#### Most recent result")
+        a,b=window_controls("latest_result_range",
+                            earliest=min(p.date for p in series.points))
+        series=_clip_series(series,a,b)
+        if not series.points:
+            st.info("No calculated observations in the selected chart range.")
+            return
         try:
             st.plotly_chart(preview_figure(series,latest),use_container_width=True,
                             theme=None,key="transform_result_preview")

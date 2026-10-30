@@ -25,7 +25,7 @@ from financial_intelligence_agent.live.fdic import bank_financial,FIELDS
 from financial_intelligence_agent.live.providers import fetch_series,Descriptor
 from financial_intelligence_agent.live.workspaces import export_workspace,import_workspace
 from financial_intelligence_agent.live.charts import (
-    ChartSpec,prepare,interactive_chart,preview_figure,image_bytes,csv_bytes,metadata_bytes,MODES,STYLES,research_bundle_bytes,chart_recipe_bytes,load_chart_recipe)
+    ChartSpec,prepare,interactive_chart,preview_figure,scale_y_to_visible,image_bytes,csv_bytes,metadata_bytes,MODES,STYLES,research_bundle_bytes,chart_recipe_bytes,load_chart_recipe)
 from financial_intelligence_agent.engine.operators import Series,execute,OPERATOR_SPECS
 from financial_intelligence_agent.engine.alerts import Rule,evaluate,COMPARES
 from financial_intelligence_agent.engine.normalization import convert_units,resample,align_date_convention,UNITS,ORDER,AGGREGATIONS
@@ -280,6 +280,7 @@ def _show_ny_chart(result):
             fig.update_layout(title=f"{definition.label} · {name}",
                 xaxis_title="Operation date",yaxis_title=f"Amount ({name})",
                 template="plotly_dark",height=320)
+            scale_y_to_visible(fig)
             st.plotly_chart(fig,use_container_width=True,key="nyfx_"+series.key,
                 config={"toImageButtonOptions":{"format":"png","filename":"nyfed-swaps-"+name,
                         "height":750,"width":1300,"scale":2}})
@@ -311,6 +312,7 @@ def _show_ny_chart(result):
         xaxis_title="Effective date" if definition.mode=="rates" else "Operation date",
         template="plotly_dark",height=460,hovermode="x unified",
         legend_title_text="Click a legend entry to show/hide")
+    scale_y_to_visible(fig)
     st.plotly_chart(fig,use_container_width=True,key="ny_chart_"+definition.id,
         config={"toImageButtonOptions":{"format":"png","filename":"nyfed-"+definition.id.split(":")[-1],
                 "height":900,"width":1500,"scale":2}})
@@ -413,6 +415,18 @@ def _load_nyfed():
         full_result=_load_ny_coverage(choice["id"],start,end)
         if full_result is None:
             st.info("No NY Fed observations in this period.");return
+        # Incremental history must also become available to the chart
+        # designer and analytical operators, not only the source preview.
+        for name,full_series in full_result.series.items():
+            existing=_state().get(full_series.key)
+            if existing is not None:
+                _add(full_series.key,full_series,existing["descriptor"],
+                     full_result.retrieved_at,"; ".join(full_result.warnings))
+        for name,full_series in full_result.volume.items():
+            existing=_state().get(full_series.key)
+            if existing is not None:
+                _add(full_series.key,full_series,existing["descriptor"],
+                     full_result.retrieved_at,"NY Fed published volume")
         result=_clip_ny_result(full_result,start,end)
     except Exception as exc:
         st.warning("Additional NY Fed history unavailable: "+str(exc))

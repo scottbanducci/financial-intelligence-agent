@@ -183,6 +183,18 @@ def main():
                 dx=operand_label.evaluate("el => el.scrollLeft")
                 assert dx>10,f"Transformation operand option did not scroll: {dx}"
                 print("PASS: Data transformations operand dropdown hover-scroll",dx)
+                probe=page.evaluate("""() => {
+                  const gd=document.querySelector('.js-plotly-plot');
+                  return gd ? {
+                    windowPlotly:typeof window.Plotly,
+                    gdKeys:Object.keys(gd).slice(0,35),
+                    gdContextKeys:Object.keys(gd._context||{}).slice(0,35),
+                    modebarButtons:[...gd.querySelectorAll('.modebar-btn')]
+                      .map(x=>x.getAttribute('data-title')).slice(0,15),
+                    gdOn:typeof gd.on,gdEmit:typeof gd.emit,
+                  } : {error:'no plotly DOM'};
+                }""")
+                print("CHART_JS_PROBE",probe,flush=True)
 
             finally:browser.close()
     finally:

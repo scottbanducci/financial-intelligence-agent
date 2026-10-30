@@ -111,6 +111,15 @@ def _rows(payload:dict,mode:str)->tuple[str,list[dict]]:
     for expected in priority:
         for path,rows in paths:
             if path.lower()==expected.lower():return path,rows
+    # An empty valid publisher envelope still establishes that the requested
+    # period has no operations. Preserve this as a negative cache interval,
+    # especially for 5Y/10Y/ALL queries predating the dataset's inception.
+    for expected in priority:
+        node=payload
+        for part in expected.split("."):
+            node=node.get(part) if isinstance(node,dict) else None
+            if node is None:break
+        if isinstance(node,list) and not node:return expected,node
     # If vendor changed its wrapper, reject rather than summing unrelated
     # data from multiple arrays. Only accept a single unambiguous array
     # containing schema-specific observation keys.

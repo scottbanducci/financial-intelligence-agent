@@ -453,7 +453,11 @@ def _load_nyfed():
             st.session_state.pop("nyfed_loaded",None)
     loaded=st.session_state.get("nyfed_loaded")
     if loaded and loaded["id"]==choice["id"] and st.session_state.pop("nyfed_load_notice",False):
-        st.success("Publisher observations loaded and available in Data transformations.")
+        if loaded.get("kind")=="product" and not loaded["result"].series:
+            st.info("Publisher records were retrieved, but no numeric chart observations "
+                    "were available in the selected period.")
+        else:
+            st.success("Publisher observations loaded and available in Data transformations.")
     if loaded is None:return
     if loaded["id"]!=choice["id"]:
         st.info("Select Load NY Fed dataset to update the chart to the current dataset.")
@@ -507,7 +511,15 @@ def _load_nyfed():
         st.warning("Additional NY Fed history unavailable: "+str(exc))
         result=_clip_ny_result(loaded["result"],start,end)
     if not result.series:
-        st.info("No observations in the selected chart window.");return
+        st.info("No numeric NY Fed observations in the selected chart window. "
+                "Missing accepted amounts have not been treated as zero.")
+        for note in result.warnings:
+            st.caption(note)
+        if result.detail:
+            with st.expander("Inspect publisher records without chart values"):
+                st.dataframe(pd.DataFrame(result.detail),
+                             use_container_width=True,hide_index=True)
+        return
     st.caption("Publisher source: "+result.source_url)
     period_controls("nyfed_range",earliest=ny_first)
     _show_ny_chart(result)

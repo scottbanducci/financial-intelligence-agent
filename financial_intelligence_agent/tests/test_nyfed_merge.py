@@ -61,6 +61,37 @@ class BatchedNYFedMergeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"unit changed"):
             _merge_ny_result(first,conflicting)
 
+    def test_no_numeric_historical_batch_merges_with_valid_recent_data(self):
+        body={"ambs":{"operations":[
+            {"operationDate":"2025-02-10","operationType":"Coupon Swap",
+             "auctionStatus":"Canceled","totalAmtAcceptedPar":None}]}}
+        older=fetch_dataset(
+            "NYFED_DATASET:AMBS","2025-02-10","2025-02-10",
+            fetch=lambda url,**kwargs:body)
+        recent=mbs_batch("2026-08-10",[("Outright Purchase",50)])
+        for first,last in ((older,recent),(recent,older)):
+            merged=_merge_ny_result(first,last)
+            self.assertEqual(len(merged.detail),2)
+            self.assertEqual(merged.units["Outright Purchase"],"USD")
+            self.assertEqual(merged.series["Outright Purchase"].points[0].value,
+                             Decimal(50))
+            self.assertTrue(any("no usable accepted" in w for w in merged.warnings))
+            self.assertNotIn("Coupon Swap",merged.series)
+
+    def test_all_missing_historical_batches_preserve_details_without_chart(self):
+        def no_amount(day):
+            body={"ambs":{"operations":[{
+                "operationDate":day,"operationType":"Coupon Swap",
+                "totalAmtAcceptedPar":None,"auctionStatus":"Canceled"}]}}
+            return fetch_dataset(
+                "NYFED_DATASET:AMBS",day,day,
+                fetch=lambda url,**kwargs:body)
+        a,b=no_amount("2025-02-10"),no_amount("2025-07-10")
+        merged=_merge_ny_result(a,b)
+        self.assertEqual(merged.series,{})
+        self.assertEqual(len(merged.detail),2)
+        self.assertEqual(len(merged.warnings),4)
+
     def test_other_operation_types_retained_when_missing_in_new_batch(self):
         first=mbs_batch("2026-01-10",[
             ("Outright Purchase",10),("Dollar Roll",20),("Coupon Swap",5)])

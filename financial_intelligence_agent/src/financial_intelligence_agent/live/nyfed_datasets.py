@@ -290,7 +290,18 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
                 unit=group
             grouped[group][observed]+=value
         if not grouped:
-            raise ValueError("Missing usable numeric operation amounts; no daily chart can be produced")
+            # Some historical intervals contain operation records without any
+            # accepted amount (e.g. canceled or not-yet-resulted operations).
+            # Preserve these records and their dates; they contribute NO chart
+            # points, not fabricated zeros. Other batches can still merge.
+            warnings.append(
+                f"{excluded_missing} NY Fed operation records dated "
+                f"{a.isoformat()} through {b.isoformat()} have no usable accepted "
+                "amounts. No chart observations were generated for this interval; "
+                "the original records remain available in the detail table. "
+                "Review the publisher schema/status if amounts were expected.")
+            return DatasetResult(d,datetime.now(timezone.utc).isoformat(),uri,
+                                 tuple(rows),tuple(),{}, {},tuple(warnings),{})
         if excluded_missing:
             warnings.append(f"{excluded_missing} operation records lack accepted amounts and were excluded from sums; original rows remain in the detail table.")
         if d.mode=="repo" and d.operation_filter is not None and have_breakdown:

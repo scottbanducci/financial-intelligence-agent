@@ -118,6 +118,31 @@ class NYFedDatasets(unittest.TestCase):
         self.assertEqual(len(report.detail),2)
         self.assertEqual(report.series["Purchase"].points[0].value,Decimal(100))
         self.assertTrue(any("excluded" in warning for warning in report.warnings))
+    def test_historical_ambs_records_without_amounts_preserved_not_zeroed(self):
+        body={"ambs":{"operations":[
+            {"operationDate":self.A,"operationType":"Outright Purchase",
+             "totalAmtAcceptedPar":None,"auctionStatus":"Canceled"},
+            {"operationDate":self.B,"operationType":"Coupon Swap",
+             "auctionStatus":"Pending"}]}}
+        report=fetch_dataset("NYFED_DATASET:AMBS",self.A,self.B,
+            fetch=mocked(body,"ambs/all/results/summary/search.json"))
+        self.assertEqual(report.series,{})
+        self.assertEqual(report.units,{})
+        self.assertEqual(report.daily,())
+        self.assertEqual(len(report.detail),2)
+        self.assertTrue(any("2 NY Fed operation records" in w for w in report.warnings))
+        self.assertTrue(any(self.A in w and self.B in w for w in report.warnings))
+
+    def test_other_nyfed_modes_do_not_invent_zero_for_missing_amounts(self):
+        body={"repo":{"operations":[
+            {"operationDate":self.A,"operationType":"Repo",
+             "totalAmtAccepted":None}]}}
+        report=fetch_dataset("NYFED_DATASET:RP_ALL",self.A,self.B,
+            fetch=mocked(body,"rp/results/search.json"))
+        self.assertEqual(report.series,{})
+        self.assertEqual(len(report.detail),1)
+        self.assertEqual(report.daily,())
+
     def test_missing_measurement_rejected_not_zero(self):
         bad={"treasury":{"auctions":[{"operationDate":self.A,"operationDirection":"P"}]}}
         with self.assertRaisesRegex(ValueError,"Missing"):

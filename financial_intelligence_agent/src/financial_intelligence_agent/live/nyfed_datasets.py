@@ -16,7 +16,7 @@ from collections import defaultdict
 import hashlib
 
 from financial_intelligence_agent.engine.operators import Point,Series,day,dec
-from financial_intelligence_agent.live.nyfed_analytics import ambs_category,net_purchases
+from financial_intelligence_agent.live.nyfed_analytics import ambs_category,net_purchases,swap_facility
 from financial_intelligence_agent.live.providers import Descriptor,_get,validate_dates,NY_BASE
 
 @dataclass(frozen=True)
@@ -291,8 +291,7 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
             else:
                 currency=str(row.get("currency","")).strip().upper()
                 if not currency:raise ValueError("Liquidity swap currency missing")
-                group=("USD-denominated · " if currency=="USD"
-                       else "Non-USD-denominated · ")+currency
+                group=swap_facility(row)+" · "+currency
                 amount=_field(row,("amount","totalAmtAccepted","totalAmount","amountAccepted","usdAmount"))
                 if dec(amount) is None:
                     excluded_missing+=1

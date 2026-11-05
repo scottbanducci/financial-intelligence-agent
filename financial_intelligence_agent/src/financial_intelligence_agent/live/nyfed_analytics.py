@@ -12,9 +12,15 @@ from financial_intelligence_agent.engine.operators import Point, Series, dec, da
 PERIODS=("D","W","M","Y")
 
 
-def ambs_category(raw_type: str) -> str:
-    """Canonicalize documented transaction families without merging directions."""
+def ambs_category(raw_type: str, direction: str|None=None) -> str:
+    """Classify by operation family and publisher's explicit P/S direction.
+
+    Real AMBS summary records expose operationType AND operationDirection.
+    An operationType='Outright' cannot be signed without its direction.
+    Dollar rolls and coupon swaps never count as outright purchases/sales.
+    """
     typ=" ".join(raw_type.casefold().replace("_"," ").replace("-"," ").split())
+    sign=(direction or "").strip().casefold()
     if "coupon" in typ and "swap" in typ:
         return "Coupon swaps"
     if "dollar" in typ and "roll" in typ:
@@ -23,6 +29,9 @@ def ambs_category(raw_type: str) -> str:
         return "Outright purchases"
     if "sale" in typ or "sell" in typ or typ=="s":
         return "Outright sales"
+    if "outright" in typ:
+        if sign in ("p","purchase","buy"):return "Outright purchases"
+        if sign in ("s","sale","sell"):return "Outright sales"
     return "Other: "+raw_type.strip()
 
 

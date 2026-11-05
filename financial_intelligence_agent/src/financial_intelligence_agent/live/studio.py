@@ -351,34 +351,15 @@ def _attach_iorb_from_fred(result,start:date,end:date):
         st.warning("IORB supplemental source (Federal Reserve Board via FRED) "
                    "could not be loaded: "+str(exc))
         return result
-    series_label="IORB (Board/FRED)"
-    added_daily=[{"observation_date":p.date.isoformat(),"series":"IORB",
-                  "rate_percent":str(p.value),"volume_billions":"",
-                  "source":"Board of Governors via FRED"}
-                 for p in series.points if p.value is not None]
-    added_detail=[{"publisher":"Board of Governors via FRED","type":"IORB",
-                   "effectiveDate":p.date.isoformat(),
-                   "percentRate":str(p.value),
-                   "source_series":"IORB",
-                   "source_url":"https://fred.stlouisfed.org/series/IORB"}
-                  for p in series.points if p.value is not None]
-    _add("FRED:IORB",series,Descriptor(
-         "FRED:IORB","Interest on Reserve Balances","FRED","percent",
-         "daily","Federal Reserve Board",
-         "https://fred.stlouisfed.org/series/IORB"))
-    ny_detail=[{"publisher":"Federal Reserve Bank of New York",**row}
-               for row in result.detail]
-    ny_daily=[{"source":"Federal Reserve Bank of New York",**row}
-              for row in result.daily]
-    return replace(result,
-        series={**result.series,series_label:series},
-        units={**result.units,series_label:"percent"},
-        daily=tuple(sorted(ny_daily+added_daily,
-                key=lambda r:(r["observation_date"],r["series"]))),
-        detail=tuple(ny_detail+added_detail),
-        warnings=tuple(result.warnings)+(
-          "IORB comes from the Board of Governors via FRED, not NY Fed Markets API.",
-          "NY Fed daily volumes are not populated for IORB.",))
+    from financial_intelligence_agent.live.nyfed_analytics import with_board_iorb
+    try:
+        _add("FRED:IORB",series,Descriptor(
+             "FRED:IORB","Interest on Reserve Balances","FRED","percent",
+             "daily","Federal Reserve Board",
+             "https://fred.stlouisfed.org/series/IORB"))
+    except ValueError as exc:
+        st.warning("IORB could not be added to the working dataset catalog: "+str(exc))
+    return with_board_iorb(result,series)
 
 
 def _show_ny_chart(result):

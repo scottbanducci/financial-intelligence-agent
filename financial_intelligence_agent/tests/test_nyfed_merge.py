@@ -34,15 +34,15 @@ class BatchedNYFedMergeTests(unittest.TestCase):
 
         merged=_merge_ny_result(first,later)
         self.assertEqual(set(merged.series),set(merged.units))
-        self.assertEqual(merged.units["Coupon Swap"],"USD")
-        self.assertEqual(merged.series["Coupon Swap"].points[0].value,Decimal(10))
+        self.assertEqual(merged.units["Coupon swaps"],"USD")
+        self.assertEqual(merged.series["Coupon swaps"].points[0].value,Decimal(10))
         self.assertEqual(
-            [point.value for point in merged.series["Dollar Roll"].points],
+            [point.value for point in merged.series["Dollar rolls"].points],
             [Decimal(20),Decimal(30)])
         self.assertEqual(
-            [point.value for point in merged.series["All operation types"].points],
+            [point.value for point in merged.series["Gross activity (accepted par)"].points],
             [Decimal(30),Decimal(70)])
-        # This exact lookup used to throw KeyError("Coupon Swap") in _load_nyfed.
+        # This exact lookup used to throw KeyError("Coupon swaps") in _load_nyfed.
         for label in merged.series:
             self.assertEqual(merged.units[label],"USD")
         self.assertEqual(len(merged.detail),4)
@@ -57,7 +57,7 @@ class BatchedNYFedMergeTests(unittest.TestCase):
     def test_conflicting_units_rejected_instead_of_silent_corruption(self):
         first=mbs_batch("2026-01-10",[("Dollar Roll",20)])
         later=mbs_batch("2026-08-10",[("Dollar Roll",30)])
-        conflicting=replace(later,units={**later.units,"Dollar Roll":"EUR"})
+        conflicting=replace(later,units={**later.units,"Dollar rolls":"EUR"})
         with self.assertRaisesRegex(ValueError,"unit changed"):
             _merge_ny_result(first,conflicting)
 
@@ -72,8 +72,8 @@ class BatchedNYFedMergeTests(unittest.TestCase):
         for first,last in ((older,recent),(recent,older)):
             merged=_merge_ny_result(first,last)
             self.assertEqual(len(merged.detail),2)
-            self.assertEqual(merged.units["Outright Purchase"],"USD")
-            self.assertEqual(merged.series["Outright Purchase"].points[0].value,
+            self.assertEqual(merged.units["Outright purchases"],"USD")
+            self.assertEqual(merged.series["Outright purchases"].points[0].value,
                              Decimal(50))
             self.assertTrue(any("no usable accepted" in w for w in merged.warnings))
             self.assertNotIn("Coupon Swap",merged.series)
@@ -97,8 +97,8 @@ class BatchedNYFedMergeTests(unittest.TestCase):
             ("Outright Purchase",10),("Dollar Roll",20),("Coupon Swap",5)])
         later=mbs_batch("2026-08-10",[("Outright Sale",7)])
         merged=_merge_ny_result(first,later)
-        for name in ("Outright Purchase","Dollar Roll","Coupon Swap",
-                     "Outright Sale","All operation types"):
+        for name in ("Outright Purchase","Dollar rolls","Coupon swaps",
+                     "Outright sales","Gross activity (accepted par)"):
             self.assertIn(name,merged.units)
             self.assertIn(name,merged.series)
 

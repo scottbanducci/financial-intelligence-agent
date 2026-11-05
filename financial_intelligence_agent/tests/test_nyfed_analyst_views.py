@@ -11,7 +11,8 @@ sys.path.insert(0,str(ROOT/"src"))
 from financial_intelligence_agent.engine.operators import Point,Series
 from financial_intelligence_agent.live.nyfed_analytics import (
     aggregate_observations,ambs_category,net_purchases,
-    treasury_maturity_breakdown,repo_contract_outstanding,swap_dimensions)
+    treasury_maturity_breakdown,repo_contract_outstanding,swap_dimensions,
+    swap_contract_outstanding)
 from financial_intelligence_agent.live.nyfed_chart_views import nyfed_figure
 
 
@@ -96,6 +97,24 @@ class AnalystViewsTests(unittest.TestCase):
             "Reported transaction amount (native currency)"] for r in groups},
             {("USD-denominated","USD"):"20",
              ("Non-USD-denominated","EUR"):"80"})
+
+    def test_swap_contract_stock_is_currency_and_counterparty_separated(self):
+        start,end=date(2026,10,1),date(2026,10,5)
+        records=[
+            {"operationType":"USD","currency":"USD","amount":"10",
+             "counterparty":"ECB","settlementDate":"2026-10-01",
+             "maturityDate":"2026-10-03"},
+            {"operationType":"Non-USD","currency":"JPY","amount":"20",
+             "counterparty":"BoJ","settlementDate":"2026-10-01",
+             "maturityDate":"2026-10-02"}]
+        stock,note=swap_contract_outstanding(records,start,end)
+        self.assertEqual(set(s.unit for s in stock.values()),{"USD","JPY"})
+        self.assertIn("PARTIAL",note)
+        self.assertTrue(all("Observed swap outstanding" in label for label in stock))
+        self.assertEqual(len(stock),2)
+        missing,_=swap_contract_outstanding([
+            {"currency":"USD","amount":"10"}],start,end)
+        self.assertEqual(missing,{})
 
     def test_plotly_aggregation_controls_are_vertical_below_legend(self):
         rate=data_series("R",[

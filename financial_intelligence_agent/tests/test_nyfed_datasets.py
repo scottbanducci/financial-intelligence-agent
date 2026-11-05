@@ -92,13 +92,15 @@ class NYFedDatasets(unittest.TestCase):
         self.assertEqual(r.series["Sales"].points[0].value,Decimal(10))
     def test_currency_separation_no_total(self):
         body={"fxSwaps":{"operations":[
-            {"operationDate":self.A,"currency":"EUR","amount":"15"},
-            {"operationDate":self.A,"currency":"USD","amount":"35"}]}}
+            {"operationDate":self.A,"currency":"EUR","amount":"15",
+             "operationType":"Non-U.S. Dollar Liquidity Swap"},
+            {"operationDate":self.A,"currency":"USD","amount":"35",
+             "operationType":"U.S. Dollar Liquidity Swap"}]}}
         r=fetch_dataset("NYFED_DATASET:FXS",self.A,self.B,
              fetch=mocked(body,"fxs/all/search.json"))
-        self.assertEqual(set(r.series),{"Non-USD-denominated · EUR","USD-denominated · USD"})
+        self.assertEqual(set(r.series),{"Non-U.S. dollar liquidity swap · EUR","U.S. dollar liquidity swap · USD"})
         self.assertNotIn("Total",r.series)
-        self.assertEqual(r.units["Non-USD-denominated · EUR"],"EUR")
+        self.assertEqual(r.units["Non-U.S. dollar liquidity swap · EUR"],"EUR")
     def test_rates_have_percentage_and_bar_volume(self):
         body={"refRates":[
             {"effectiveDate":self.A,"type":"SOFR","percentRate":"3.7","volumeInBillions":"2940"},

@@ -34,6 +34,7 @@ FRED_PRESETS={
     "WSHOSHO":("Treasury securities held by Federal Reserve","Millions of USD","weekly"),
     "WSHOMCB":("Mortgage-backed securities held by Federal Reserve","Millions of USD","weekly"),
     "SOFR":("Secured Overnight Financing Rate","percent","daily"),
+    "IORB":("Interest on Reserve Balances (Board of Governors)","percent","daily"),
     "EFFR":("Effective Federal Funds Rate","percent","daily"),
     "IORB":("Interest on Reserve Balances","percent","daily"),
     "DFF":("Federal Funds Effective Rate","percent","daily"),

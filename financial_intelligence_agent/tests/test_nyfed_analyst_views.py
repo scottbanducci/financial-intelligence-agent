@@ -24,6 +24,10 @@ def data_series(key, values, unit="USD"):
 class AnalystViewsTests(unittest.TestCase):
     def test_operation_categories_keep_economic_distinctions(self):
         self.assertEqual(ambs_category("Outright Purchase"),"Outright purchases")
+        self.assertEqual(ambs_category("Outright","P"),"Outright purchases")
+        self.assertEqual(ambs_category("Outright","S"),"Outright sales")
+        self.assertEqual(ambs_category("Outright"),"Other: Outright")
+        self.assertEqual(ambs_category("Dollar Roll","P"),"Dollar rolls")
         self.assertEqual(ambs_category("Sale"),"Outright sales")
         self.assertEqual(ambs_category("Coupon Swap"),"Coupon swaps")
         self.assertEqual(ambs_category("Dollar Roll"),"Dollar rolls")

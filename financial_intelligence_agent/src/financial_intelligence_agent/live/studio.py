@@ -329,6 +329,58 @@ def _load_fred():
 def _fetch_ny_dataset(dataset_id:str,start:str,end:str):
     return fetch_dataset(dataset_id,start,end)
 
+def _attach_iorb_from_fred(result,start:date,end:date):
+    """Add Board IORB to NY Fed reference rates without hiding its provenance.
+
+    This happens on the *display* result after NY Fed batches have merged.
+    FRED observations are separate published records, never represented as
+    fields originating from the NY Fed reference-rate response.
+    """
+    if result.definition.mode!="rates":
+        return result
+    try:
+        found=_load_series_coverage("FRED:IORB",start,end)
+        if found is None:
+            st.info("IORB is not available for these dates (series starts July 2021).")
+            return result
+        series=_clip_series(replace(found.series,key="FRED:IORB",
+                                    unit="percent",frequency="daily"),start,end)
+        if not series.points:
+            return result
+    except Exception as exc:
+        st.warning("IORB supplemental source (Federal Reserve Board via FRED) "
+                   "could not be loaded: "+str(exc))
+        return result
+    series_label="IORB (Board/FRED)"
+    added_daily=[{"observation_date":p.date.isoformat(),"series":"IORB",
+                  "rate_percent":str(p.value),"volume_billions":"",
+                  "source":"Board of Governors via FRED"}
+                 for p in series.points if p.value is not None]
+    added_detail=[{"publisher":"Board of Governors via FRED","type":"IORB",
+                   "effectiveDate":p.date.isoformat(),
+                   "percentRate":str(p.value),
+                   "source_series":"IORB",
+                   "source_url":"https://fred.stlouisfed.org/series/IORB"}
+                  for p in series.points if p.value is not None]
+    _add("FRED:IORB",series,Descriptor(
+         "FRED:IORB","Interest on Reserve Balances","FRED","percent",
+         "daily","Federal Reserve Board",
+         "https://fred.stlouisfed.org/series/IORB"))
+    ny_detail=[{"publisher":"Federal Reserve Bank of New York",**row}
+               for row in result.detail]
+    ny_daily=[{"source":"Federal Reserve Bank of New York",**row}
+              for row in result.daily]
+    return replace(result,
+        series={**result.series,series_label:series},
+        units={**result.units,series_label:"percent"},
+        daily=tuple(sorted(ny_daily+added_daily,
+                key=lambda r:(r["observation_date"],r["series"]))),
+        detail=tuple(ny_detail+added_detail),
+        warnings=tuple(result.warnings)+(
+          "IORB comes from the Board of Governors via FRED, not NY Fed Markets API.",
+          "NY Fed daily volumes are not populated for IORB.",))
+
+
 def _show_ny_chart(result):
     """One publication-aware view per comparable monetary unit.
 
@@ -378,8 +430,10 @@ def _load_nyfed():
     # records can be sourced separately where published by the issuer.
     ny_first=date(1986,1,1) if choice["provider"]=="NYFED_PD" else date(2000,1,1)
     loaded_before=st.session_state.get("nyfed_loaded") or {}
+    # Date inputs must remain available before loading and for periods
+    # that legitimately have no observations; never disable dates by coverage.
     start,end=window_controls("nyfed_range",earliest=ny_first,
-                              show_controls=loaded_before.get("id")==choice["id"])
+                              show_controls=True)
     if st.button("Load NY Fed dataset",key="nyfed_fetch_dataset",type="primary"):
         try:
             if choice["provider"]=="NYFED_PD":
@@ -401,7 +455,10 @@ def _load_nyfed():
                 st.session_state["nyfed_loaded"]={"kind":"dealer","id":choice["id"]}
             else:
                 result=_load_ny_coverage(choice["id"],start,end)
-                if result is None:raise ValueError("No NY Fed data in this period")
+                if result is None:
+                    st.info("No NY Fed observations exist in the selected interval. "
+                            "Choose any other date range; no empty dates are disabled.")
+                    return
                 for name,series in result.series.items():
                     desc=Descriptor(series.key,choice["label"]+" · "+name,"NYFED",
                         result.units[name],"daily",choice["category"],
@@ -481,6 +538,8 @@ def _load_nyfed():
     except Exception as exc:
         st.warning("Additional NY Fed history unavailable: "+str(exc))
         result=_clip_ny_result(loaded["result"],start,end)
+    if result.definition.mode=="rates" and result.series:
+        result=_attach_iorb_from_fred(result,start,end)
     if not result.series:
         st.info("No numeric NY Fed observations in the selected chart window. "
                 "Missing accepted amounts have not been treated as zero.")

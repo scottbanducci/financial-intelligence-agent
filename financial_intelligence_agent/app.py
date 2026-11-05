@@ -24,7 +24,7 @@ from financial_intelligence_agent.live.studio import render as live_studio, rend
 from financial_intelligence_agent.live.chart_controls import window_controls,period_controls
 import json
 
-st.set_page_config(page_title="Market Liquidity | Research Workbench",layout="wide",page_icon="◈")
+st.set_page_config(page_title="Market Data | Analyst Workbench",layout="wide",page_icon="◈")
 # Launch-time metadata indexing. The local cached index is immediately
 # searchable; FRED pagination and NY Fed metadata discovery run in a daemon
 # worker, so a huge publisher catalog cannot block the first browser render.
@@ -103,8 +103,8 @@ def header(section,title,description):
     st.write(description)
 
 engine=make_engine()
-st.sidebar.markdown("### ◈ LIQUIDITY INTELLIGENCE")
-st.sidebar.caption("EXPERIMENTAL / RESEARCH WORKBENCH")
+st.sidebar.markdown("### ◈ MARKET DATA ANALYST WORKBENCH")
+st.sidebar.caption("ANALYST RESEARCH / DATA EXPLORATION")
 page=st.sidebar.radio("Workspace",["Live Data Studio","Data transformations","Command center","Funding desk","Operator lab","Model lab","Analyst agent","Data catalog"])
 st.sidebar.divider()
 if page in ("Live Data Studio","Data transformations"):

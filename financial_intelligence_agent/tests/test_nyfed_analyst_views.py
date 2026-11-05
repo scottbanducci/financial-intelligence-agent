@@ -11,7 +11,8 @@ sys.path.insert(0,str(ROOT/"src"))
 from financial_intelligence_agent.engine.operators import Point,Series
 from financial_intelligence_agent.live.nyfed_analytics import (
     aggregate_observations,ambs_category,net_purchases,
-    treasury_maturity_breakdown,repo_contract_outstanding,swap_dimensions,
+    treasury_maturity_breakdown,repo_contract_outstanding,repo_principal_cash_events,
+    swap_dimensions,
     swap_contract_outstanding,with_board_iorb)
 from financial_intelligence_agent.live.nyfed_chart_views import nyfed_figure
 from financial_intelligence_agent.live.nyfed_datasets import fetch_dataset
@@ -86,6 +87,27 @@ class AnalystViewsTests(unittest.TestCase):
             {"operationType":"Repo","totalAmtAccepted":"100"}],start,end)
         self.assertEqual(empty,{})
         self.assertIn("unavailable",note)
+
+    def test_repo_principal_cash_effects_use_settlement_and_maturity(self):
+        start,end=date(2026,10,1),date(2026,10,4)
+        rows=[
+            {"operationType":"Repo","totalAmtAccepted":"100",
+             "settlementDate":"2026-10-01","maturityDate":"2026-10-03"},
+            {"operationType":"Reverse Repo","totalAmtAccepted":"40",
+             "settlementDate":"2026-10-02","maturityDate":"2026-10-04"}]
+        flows,note=repo_principal_cash_events(rows,start,end)
+        self.assertIn("Principal-only",note)
+        values={p.date:p.value for p in
+                flows["Net observed principal cash effect"].points}
+        self.assertEqual(values,{
+            date(2026,10,1):Decimal(100),
+            date(2026,10,2):Decimal(-40),
+            date(2026,10,3):Decimal(-100),
+            date(2026,10,4):Decimal(40)})
+        self.assertEqual(sum(values.values()),Decimal(0))
+        missing,_=repo_principal_cash_events(
+            [{"operationType":"Repo","totalAmtAccepted":"5"}],start,end)
+        self.assertFalse(missing)
 
     def test_swap_dimensions_do_not_combine_currencies(self):
         rows=[

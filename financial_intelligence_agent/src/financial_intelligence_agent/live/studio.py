@@ -330,55 +330,26 @@ def _fetch_ny_dataset(dataset_id:str,start:str,end:str):
     return fetch_dataset(dataset_id,start,end)
 
 def _show_ny_chart(result):
-    import plotly.graph_objects as go
+    """One publication-aware view per comparable monetary unit.
+
+    D/W/M/Y buttons sit below the legend, and a wide right margin keeps
+    the dual-axis reference-rates plot clear of the legend.
+    """
+    from financial_intelligence_agent.live.nyfed_chart_views import nyfed_figure
     definition=result.definition
     if definition.mode=="swaps":
-        # Different currencies are separate physical units: separate axes and
-        # charts rather than misleading mixed-currency dollar comparisons.
-        for name,series in result.series.items():
-            fig=go.Figure()
-            fig.add_trace(go.Scatter(x=[p.date for p in series.points],
-                                     y=[float(p.value) for p in series.points],
-                                     mode="lines+markers",name=name))
-            fig.update_layout(title=f"{definition.label} · {name}",
-                xaxis_title="Operation date",yaxis_title=f"Amount ({name})",
-                template="plotly_dark",height=320)
-            scale_y_to_visible(fig)
-            st.plotly_chart(fig,use_container_width=True,key="nyfx_"+series.key,
-                config={"toImageButtonOptions":{"format":"png","filename":"nyfed-swaps-"+name,
-                        "height":750,"width":1300,"scale":2}})
-        return
-    fig=go.Figure()
-    if definition.mode=="rates":
-        for typ,series in sorted(result.series.items()):
-            fig.add_trace(go.Scatter(x=[p.date for p in series.points],
-                y=[float(p.value) for p in series.points],name=typ+" rate",
-                mode="lines",yaxis="y",legendgroup=typ))
-            volume=result.volume.get(typ)
-            if volume:
-                fig.add_trace(go.Bar(x=[p.date for p in volume.points],
-                    y=[float(p.value) for p in volume.points],
-                    name=typ+" volume",yaxis="y2",opacity=0.22,
-                    legendgroup=typ,visible=True if typ=="SOFR" else "legendonly"))
-        fig.update_layout(yaxis_title="Reference rate (%)",
-            yaxis2=dict(title="Volume (USD billions)",overlaying="y",side="right",
-                        showgrid=False),barmode="group")
-    else:
+        # Native currencies are not additive. Separate figures and axes.
         for label,series in sorted(result.series.items()):
-            default="legendonly" if label=="All operation types" else True
-            fig.add_trace(go.Scatter(x=[p.date for p in series.points],
-                y=[float(p.value) for p in series.points],mode="lines+markers",
-                name=label,visible=default))
-        fig.update_layout(yaxis_title=("Accepted par amount (USD)" if definition.mode in ("treasury","operations")
-                                      else "Accepted amount (USD)"))
-    fig.update_layout(title=definition.label,
-        xaxis_title="Effective date" if definition.mode=="rates" else "Operation date",
-        template="plotly_dark",height=460,hovermode="x unified",
-        legend_title_text="Click a legend entry to show/hide")
-    scale_y_to_visible(fig)
-    st.plotly_chart(fig,use_container_width=True,key="ny_chart_"+definition.id,
-        config={"toImageButtonOptions":{"format":"png","filename":"nyfed-"+definition.id.split(":")[-1],
-                "height":900,"width":1500,"scale":2}})
+            fig=nyfed_figure({label:series},
+                title=definition.label+" · "+label+" ("+series.unit+")",
+                mode="swaps")
+            st.plotly_chart(fig,use_container_width=True,theme=None,
+                            key="ny_swap_"+series.key)
+        return
+    fig=nyfed_figure(result.series,title=definition.label,
+                     mode=definition.mode,volume=result.volume)
+    st.plotly_chart(fig,use_container_width=True,theme=None,
+                    key="ny_chart_"+definition.id)
 
 
 def _load_nyfed():

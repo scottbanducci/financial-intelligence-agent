@@ -24,6 +24,15 @@ def probe():
                 entry["record_path"]=path
                 entry["records"]=len(records)
                 entry["sample_keys"]=list(records[0])[:40] if records else []
+                # Public schema/category values only: helps detect new issuer
+                # terminology without including any full operation records.
+                entry["operation_types"]=sorted({str(row.get("operationType",""))
+                                                   for row in records if row.get("operationType")})[:35]
+                entry["operation_directions"]=sorted({str(row.get("operationDirection",""))
+                                                        for row in records if row.get("operationDirection")})[:10]
+                entry["currency_types"]=sorted({(str(row.get("currency")),
+                                                  str(row.get("operationType")))
+                                                  for row in records if row.get("currency")})[:35]
             except Exception as exc:
                 entry["schema_error"]=str(exc)[:150]
             try:

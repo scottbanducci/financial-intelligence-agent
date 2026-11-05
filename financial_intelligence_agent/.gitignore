@@ -8,3 +8,9 @@ scratch/**
 !scratch/README.md
 **/explorations/**
 **/!explorations/README.md
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+.cache/
+*.sqlite*

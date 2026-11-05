@@ -129,6 +129,50 @@ def repo_contract_outstanding(
     return out,note
 
 
+def swap_contract_outstanding(
+    rows:list[dict]|tuple[dict,...],start:date,end:date,
+)->tuple[dict[str,Series],str]:
+    """Observed swap-contract positions, only when lifecycle dates exist.
+
+    Values stay in native currency and separate by counterparty. Historical
+    carry-in and unreported contracts mean these are *not* official balances.
+    """
+    positions:dict[str,dict[date,Decimal]]=defaultdict(lambda:defaultdict(Decimal))
+    metadata={}
+    missing=0
+    for row in rows:
+        currency=str(row.get("currency","")).upper().strip()
+        amount=dec(row.get("amount"))
+        a,b=day(row.get("settlementDate")),day(row.get("maturityDate"))
+        if not currency or amount is None or a is None or b is None or b<=a:
+            missing+=1
+            continue
+        counterparty=next((str(row[k]).strip() for k in (
+            "counterparty","centralBank","foreignCentralBank","counterpartyBank")
+            if row.get(k)),"Unspecified counterparty")
+        label="Observed swap outstanding · "+currency+" · "+counterparty
+        metadata[label]=currency
+        current,last=max(start,a),min(end,b-timedelta(days=1))
+        while current<=last:
+            positions[label][current]+=amount
+            current+=timedelta(days=1)
+    if not positions:
+        return {},"Outstanding swap positions unavailable: no complete amount, settlement and maturity records in this selection."
+    from hashlib import sha256
+    stock={}
+    for label,values in positions.items():
+        stock[label]=Series("NYFED_SWAP_"+sha256(label.encode()).hexdigest()[:14],
+            "NYFED",metadata[label],"daily",
+            tuple(Point(d,v) for d,v in sorted(values.items())),
+            "settlement_date")
+    note=("PARTIAL observed-contract positions from reported swap transactions "
+          "only; not official outstanding liquidity-swap balances. "
+          "Native currencies and counterparties remain separate.")
+    if missing:
+        note+=f" {missing} transaction(s) lacked complete lifecycle fields."
+    return stock,note
+
+
 def swap_dimensions(rows:list[dict]|tuple[dict,...])->list[dict]:
     """Show distinct facility/currency/counterparty flows without FX conversion."""
     values:dict[tuple[str,str,str],Decimal]=defaultdict(Decimal)

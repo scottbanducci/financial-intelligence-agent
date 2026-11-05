@@ -12,8 +12,9 @@ from financial_intelligence_agent.engine.operators import Point,Series
 from financial_intelligence_agent.live.nyfed_analytics import (
     aggregate_observations,ambs_category,net_purchases,
     treasury_maturity_breakdown,repo_contract_outstanding,swap_dimensions,
-    swap_contract_outstanding)
+    swap_contract_outstanding,with_board_iorb)
 from financial_intelligence_agent.live.nyfed_chart_views import nyfed_figure
+from financial_intelligence_agent.live.nyfed_datasets import fetch_dataset
 
 
 def data_series(key, values, unit="USD"):
@@ -115,6 +116,30 @@ class AnalystViewsTests(unittest.TestCase):
         missing,_=swap_contract_outstanding([
             {"currency":"USD","amount":"10"}],start,end)
         self.assertEqual(missing,{})
+
+    def test_iorb_board_fred_overlay_keeps_both_sources_in_tables(self):
+        fake={"refRates":[{"effectiveDate":"2026-10-01",
+                           "type":"SOFR","percentRate":"3.70",
+                           "volumeInBillions":"290"}]}
+        result=fetch_dataset("NYFED_DATASET:RATES","2026-10-01","2026-10-03",
+            fetch=lambda url,**kwargs:fake)
+        iorb=Series("FRED:IORB","FRED","percent","daily",(
+            Point(date(2026,10,1),Decimal("3.90")),
+            Point(date(2026,10,2),Decimal("3.90"))))
+        merged=with_board_iorb(result,iorb)
+        self.assertIn("IORB (Board/FRED)",merged.series)
+        self.assertEqual(merged.units["IORB (Board/FRED)"],"percent")
+        self.assertEqual(len(merged.daily),3)
+        self.assertEqual(len(merged.detail),3)
+        self.assertEqual(
+            len([r for r in merged.detail if r["publisher"]=="Board of Governors via FRED"]),2)
+        self.assertEqual(
+            len([r for r in merged.detail if r["publisher"]=="Federal Reserve Bank of New York"]),1)
+        self.assertEqual(
+            len([r for r in merged.daily if r["series"]=="IORB"]),2)
+        self.assertTrue(all("source_url" in r for r in merged.detail
+                            if r["type"]=="IORB"))
+        self.assertEqual(len(result.detail),1)  # Original publisher records unchanged.
 
     def test_plotly_aggregation_controls_are_vertical_below_legend(self):
         rate=data_series("R",[

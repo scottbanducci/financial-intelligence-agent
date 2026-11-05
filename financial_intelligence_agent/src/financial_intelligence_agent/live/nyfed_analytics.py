@@ -139,6 +139,56 @@ def repo_contract_outstanding(
     return out,note
 
 
+def repo_principal_cash_events(
+    rows:list[dict]|tuple[dict,...],start:date,end:date,
+)->tuple[dict[str,Series],str]:
+    """Settlement/maturity principal effects of *observed* repo contracts.
+
+    Repo settlement increases reserves; reverse repo settlement decreases
+    them. Maturities reverse principal direction, without interest. This is
+    NOT a complete measure of banking-system reserve change.
+    """
+    events:dict[str,dict[date,Decimal]]=defaultdict(lambda:defaultdict(Decimal))
+    missing=0;seen=0
+    for row in rows:
+        typ=str(row.get("operationType","")).casefold().strip()
+        if typ not in ("repo","reverse repo"):continue
+        amount=dec(row.get("totalAmtAccepted"))
+        settle,mature=day(row.get("settlementDate")),day(row.get("maturityDate"))
+        if amount is None or settle is None or mature is None or mature<=settle:
+            missing+=1;continue
+        seen+=1
+        repo=typ=="repo"
+        for d,sign,label in (
+            (settle,1 if repo else -1,
+             "Repo settlement (+)" if repo else "Reverse repo settlement (−)"),
+            (mature,-1 if repo else 1,
+             "Repo maturity (−)" if repo else "Reverse repo maturity (+)")):
+            if start<=d<=end:
+                events[label][d]+=amount*sign
+    if not seen:
+        return {},"Contract-implied cash movements unavailable: accepted amounts and both lifecycle dates are required."
+    net:dict[date,Decimal]=defaultdict(Decimal)
+    for amounts in events.values():
+        for d,value in amounts.items():net[d]+=value
+    if net:events["Net observed principal cash effect"]=net
+    if not net:
+        return {},"No settlement or maturity cash events occur in the selected window for retrieved contracts."
+    from hashlib import sha256
+    series={}
+    for label,amounts in events.items():
+        series[label]=Series(
+            "NYFED_CASH_"+sha256(label.encode()).hexdigest()[:12],
+            "NYFED","USD","daily",
+            tuple(Point(d,value) for d,value in sorted(amounts.items())),
+            "settlement_date")
+    note=("Principal-only cash effects for OBSERVED contracts, not an official "
+          "net reserve-flow series. Trades initiated outside downloaded "
+          "history, interest and other reserve factors are excluded.")
+    if missing:note+=f" {missing} incomplete records excluded."
+    return series,note
+
+
 def swap_contract_outstanding(
     rows:list[dict]|tuple[dict,...],start:date,end:date,
 )->tuple[dict[str,Series],str]:

@@ -29,8 +29,8 @@ class BatchedNYFedMergeTests(unittest.TestCase):
             ("Coupon Swap",10),("Dollar Roll",20)])
         later=mbs_batch("2026-08-10",[
             ("Dollar Roll",30),("Outright Purchase",40)])
-        self.assertIn("Coupon Swap",first.units)
-        self.assertNotIn("Coupon Swap",later.units)
+        self.assertIn("Coupon swaps",first.units)
+        self.assertNotIn("Coupon swaps",later.units)
 
         merged=_merge_ny_result(first,later)
         self.assertEqual(set(merged.series),set(merged.units))
@@ -52,7 +52,7 @@ class BatchedNYFedMergeTests(unittest.TestCase):
         later=mbs_batch("2026-08-10",[("Coupon Swap",10)])
         merged=_merge_ny_result(first,later)
         self.assertEqual(set(merged.series),set(merged.units))
-        self.assertIn("Coupon Swap",merged.units)
+        self.assertIn("Coupon swaps",merged.units)
 
     def test_conflicting_units_rejected_instead_of_silent_corruption(self):
         first=mbs_batch("2026-01-10",[("Dollar Roll",20)])
@@ -76,7 +76,7 @@ class BatchedNYFedMergeTests(unittest.TestCase):
             self.assertEqual(merged.series["Outright purchases"].points[0].value,
                              Decimal(50))
             self.assertTrue(any("no usable accepted" in w for w in merged.warnings))
-            self.assertNotIn("Coupon Swap",merged.series)
+            self.assertNotIn("Coupon swaps",merged.series)
 
     def test_all_missing_historical_batches_preserve_details_without_chart(self):
         def no_amount(day):
@@ -97,7 +97,7 @@ class BatchedNYFedMergeTests(unittest.TestCase):
             ("Outright Purchase",10),("Dollar Roll",20),("Coupon Swap",5)])
         later=mbs_batch("2026-08-10",[("Outright Sale",7)])
         merged=_merge_ny_result(first,later)
-        for name in ("Outright Purchase","Dollar rolls","Coupon swaps",
+        for name in ("Outright purchases","Dollar rolls","Coupon swaps",
                      "Outright sales","Gross activity (accepted par)"):
             self.assertIn(name,merged.units)
             self.assertIn(name,merged.series)

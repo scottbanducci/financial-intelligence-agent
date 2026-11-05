@@ -16,6 +16,7 @@ from collections import defaultdict
 import hashlib
 
 from financial_intelligence_agent.engine.operators import Point,Series,day,dec
+from financial_intelligence_agent.live.nyfed_analytics import ambs_category,net_purchases
 from financial_intelligence_agent.live.providers import Descriptor,_get,validate_dates,NY_BASE
 
 @dataclass(frozen=True)
@@ -231,7 +232,12 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
             observed=_date(row,d.mode)
             if d.mode=="repo":
                 typ=str(row["operationType"])
-                group=typ if d.operation_filter is None else "Total "+d.operation_filter
+                if d.operation_filter is not None:
+                    group=("Repo accepted" if d.operation_filter=="Repo" else
+                           "Reverse repo accepted")
+                else:
+                    group={"repo":"Repo accepted","reverse repo":"Reverse repo accepted"}.get(
+                        typ.strip().casefold(),typ+" accepted")
                 amount=_field(row,("totalAmtAccepted",))
                 if dec(amount) is None:
                     excluded_missing+=1
@@ -271,23 +277,28 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
                 value=dec(amount)
                 unit="USD"
             elif d.mode=="operations":
-                group=str(row.get("operationType","")).strip()
-                if not group:raise ValueError("AMBS operationType missing")
-                amount=_field(row,("totalAmtAcceptedPar","totalParAmtAccepted","totalAmtAccepted"))
+                raw_type=str(row.get("operationType","")).strip()
+                if not raw_type:raise ValueError("AMBS operationType missing")
+                group=ambs_category(raw_type)
+                # Agency MBS RESULTS/SUMMARY reports accepted PAR. Other
+                # monetary fields are not interchangeable measurements.
+                amount=_field(row,("totalAmtAcceptedPar",))
                 if dec(amount) is None:
                     excluded_missing+=1
                     continue
                 value=dec(amount)
                 unit="USD"
             else:
-                group=str(row.get("currency","")).strip().upper()
-                if not group:raise ValueError("Liquidity swap currency missing")
+                currency=str(row.get("currency","")).strip().upper()
+                if not currency:raise ValueError("Liquidity swap currency missing")
+                group=("USD-denominated · " if currency=="USD"
+                       else "Non-USD-denominated · ")+currency
                 amount=_field(row,("amount","totalAmtAccepted","totalAmount","amountAccepted","usdAmount"))
                 if dec(amount) is None:
                     excluded_missing+=1
                     continue
                 value=dec(amount)
-                unit=group
+                unit=currency
             grouped[group][observed]+=value
         if not grouped:
             # Some historical intervals contain operation records without any
@@ -310,16 +321,29 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
             warnings.append("Security-type lines are included only where an operation reports a directly attributable securityType; they need not sum to the total if some operations lack that field.")
         if d.mode=="repo" and d.operation_filter is not None and not have_breakdown:
             warnings.append("No reconciled per-security accepted amounts were available; totals only, without a fabricated security breakdown.")
-        if d.mode=="swaps":warnings.append("Currencies remain separate. Never sum or equate volumes in different currencies.")
+        if d.mode=="swaps":
+            warnings.append("Currency-denominated swap TRANSACTION FLOWS are separate; no FX conversion or summation between currencies. Outstanding balances are not inferred from flows.")
         if d.mode=="operations" and grouped:
             totals:dict[date,Decimal]=defaultdict(Decimal)
+            # Only source groups enter gross; computed net is NOT an extra flow.
             for values in grouped.values():
                 for observed,value in values.items():totals[observed]+=value
-            grouped["All operation types"]=totals
+            grouped["Gross activity (accepted par)"]=totals
+            buys=grouped.get("Outright purchases",{})
+            sells=grouped.get("Outright sales",{})
+            if buys or sells:
+                grouped["Net outright purchases"]=net_purchases(buys,sells)
+            if any(label.startswith("Other: ") for label in grouped):
+                warnings.append("Unrecognized MBS operation types remain separate and count toward gross activity, not net outright purchases.")
+        if d.mode=="treasury":
+            grouped["Net purchases"]=net_purchases(
+                grouped.get("Purchases",{}),grouped.get("Sales",{}))
+            warnings.append("Net purchases = purchase accepted par minus sale accepted par; operation-date transactions, not settled SOMA holdings.")
         for label,amounts in sorted(grouped.items()):
             digest=hashlib.sha256((d.id+":"+label).encode()).hexdigest()[:12]
-            series[label]=_series("NY_"+digest,d.mode,unit if d.mode!="swaps" else label,amounts,uri)
-            units[label]=unit if d.mode!="swaps" else label
+            chart_unit=label.rsplit(" · ",1)[-1] if d.mode=="swaps" else unit
+            series[label]=_series("NY_"+digest,d.mode,chart_unit,amounts,uri)
+            units[label]=chart_unit
             for observed,value in sorted(amounts.items()):
                 daily.append({"observation_date":observed.isoformat(),"series":label,
                               "value":str(value),"unit":units[label]})

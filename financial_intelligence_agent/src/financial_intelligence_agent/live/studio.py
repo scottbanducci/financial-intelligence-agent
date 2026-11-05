@@ -537,8 +537,8 @@ def _load_nyfed():
     _show_ny_chart(result)
     for note in result.warnings:st.caption(note)
     from financial_intelligence_agent.live.nyfed_analytics import (
-        repo_contract_outstanding,treasury_maturity_breakdown,swap_dimensions,
-        swap_contract_outstanding)
+        repo_contract_outstanding,repo_principal_cash_events,
+        treasury_maturity_breakdown,swap_dimensions,swap_contract_outstanding)
     mode=result.definition.mode
     if mode=="repo":
         st.markdown("#### Repo and reverse repo: observed outstanding positions")
@@ -554,9 +554,22 @@ def _load_nyfed():
             st.info("An outstanding-balance chart cannot be inferred from these "
                     "accepted-volume records alone. A position requires settlement "
                     "and maturity dates or an independent outstanding-stock source.")
-        st.caption("Accepted repo and reverse repo transaction amounts are shown "
-                   "in the chart above. Do not infer net daily reserve changes "
-                   "from accepted amounts without cash settlement and maturity.")
+        st.markdown("#### Observed repo settlement and maturity cash effects")
+        cash_events,cash_note=repo_principal_cash_events(result.detail,start,end)
+        st.caption(cash_note)
+        if cash_events:
+            from financial_intelligence_agent.live.nyfed_chart_views import nyfed_figure
+            st.plotly_chart(nyfed_figure(
+                cash_events,title="Contract-implied principal cash movements",
+                mode="repo"),use_container_width=True,theme=None,
+                key="ny_repo_cash_"+choice["id"])
+        else:
+            st.info("Insufficient settlement and maturity records to calculate "
+                    "cash movements for this interval.")
+        st.caption("The upper chart shows accepted transaction volumes. The "
+                   "position chart is a partial observed-contract stock; the "
+                   "cash chart tracks principal at settlement and maturity. "
+                   "Neither is a complete net-reserves calculation.")
     elif mode=="treasury":
         st.markdown("#### Treasury maturity distribution")
         maturity_rows=treasury_maturity_breakdown(result.detail)

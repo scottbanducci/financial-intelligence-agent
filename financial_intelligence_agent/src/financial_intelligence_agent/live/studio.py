@@ -555,7 +555,8 @@ def _load_nyfed():
     _show_ny_chart(result)
     for note in result.warnings:st.caption(note)
     from financial_intelligence_agent.live.nyfed_analytics import (
-        repo_contract_outstanding,treasury_maturity_breakdown,swap_dimensions)
+        repo_contract_outstanding,treasury_maturity_breakdown,swap_dimensions,
+        swap_contract_outstanding)
     mode=result.definition.mode
     if mode=="repo":
         st.markdown("#### Repo and reverse repo: observed outstanding positions")
@@ -593,8 +594,23 @@ def _load_nyfed():
                          use_container_width=True,hide_index=True)
         st.caption("These are reported transaction flows in native currencies. "
                    "USD and non-USD facilities are not summed or FX-converted. "
-                   "Outstanding swap balances require a separate stock measure; "
-                   "they cannot be inferred by summing transaction volumes.")
+                   "Transactions are not balances outstanding.")
+        swap_stocks,swap_note=swap_contract_outstanding(result.detail,start,end)
+        st.markdown("#### Swap contracts outstanding (where lifecycle data exist)")
+        st.caption(swap_note)
+        if swap_stocks:
+            from financial_intelligence_agent.live.nyfed_chart_views import nyfed_figure
+            # Never put distinct physical currencies on one numerical axis.
+            for label,position_series in sorted(swap_stocks.items()):
+                st.plotly_chart(nyfed_figure(
+                    {label:position_series},
+                    title=label,mode="swaps",stock=True),
+                    use_container_width=True,theme=None,
+                    key="ny_swap_stock_"+position_series.key)
+        else:
+            st.info("The current response cannot establish swap positions "
+                    "outstanding. A source of outstanding balances is required "
+                    "to report an official stock measure.")
     elif mode=="rates":
         st.caption("Rate aggregation: D shows reported rates; W/M/Y use the "
                    "arithmetic mean of observed daily percentages. Transaction "

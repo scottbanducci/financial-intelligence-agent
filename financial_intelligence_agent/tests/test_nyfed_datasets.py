@@ -34,15 +34,15 @@ class NYFedDatasets(unittest.TestCase):
             {"operationDate":self.B,"operationType":"Repo","totalAmtAccepted":"50","securityType":"tsy"}]}}
         fetch=mocked(data,"rp/results/search.json")
         combined=fetch_dataset("NYFED_DATASET:RP_ALL",self.A,self.B,fetch=fetch)
-        self.assertEqual(combined.series["Repo"].points[0].value,Decimal("125"))
-        self.assertEqual(combined.series["Reverse Repo"].points[0].value,Decimal("500"))
+        self.assertEqual(combined.series["Repo accepted"].points[0].value,Decimal("125"))
+        self.assertEqual(combined.series["Reverse repo accepted"].points[0].value,Decimal("500"))
         repo=fetch_dataset("NYFED_DATASET:RP_REPO",self.A,self.B,fetch=fetch)
-        self.assertEqual(repo.series["Total Repo"].points[0].value,Decimal("125"))
+        self.assertEqual(repo.series["Repo accepted"].points[0].value,Decimal("125"))
         self.assertEqual(repo.series["Security: tsy"].points[0].value,Decimal("100"))
         self.assertEqual(len(repo.detail),3)
         reverse=fetch_dataset("NYFED_DATASET:RP_RRP",self.A,self.B,fetch=fetch)
         self.assertEqual(len(reverse.detail),1)
-        self.assertEqual(reverse.series["Total Reverse Repo"].points[0].value,Decimal("500"))
+        self.assertEqual(reverse.series["Reverse repo accepted"].points[0].value,Decimal("500"))
     def test_nested_repo_security_type_allocations_reconcile(self):
         body={"repo":{"operations":[
             {"operationDate":self.A,"operationType":"Repo",
@@ -54,7 +54,7 @@ class NYFedDatasets(unittest.TestCase):
                  {"securityType":"tsy","amtAccepted":"30"}]}]}}
         r=fetch_dataset("NYFED_DATASET:RP_REPO",self.A,self.B,
           fetch=mocked(body,"rp/results/search.json"))
-        self.assertEqual(r.series["Total Repo"].points[0].value,Decimal(150))
+        self.assertEqual(r.series["Repo accepted"].points[0].value,Decimal(150))
         self.assertEqual(r.series["Security: tsy"].points[0].value,Decimal(110))
         self.assertEqual(r.series["Security: mbs"].points[0].value,Decimal(40))
     def test_unreconciled_nested_repo_amounts_omitted_not_doubled(self):
@@ -64,7 +64,7 @@ class NYFedDatasets(unittest.TestCase):
                  {"securityType":"tsy","amtAccepted":"80"}]}]}}
         r=fetch_dataset("NYFED_DATASET:RP_REPO",self.A,self.B,
           fetch=mocked(body,"rp/results/search.json"))
-        self.assertEqual(set(r.series),{"Total Repo"})
+        self.assertEqual(set(r.series),{"Repo accepted"})
         self.assertTrue(any("reconciled" in note for note in r.warnings))
     def test_am_bs_aggregate_by_operation_type_and_total(self):
         body={"ambs":{"operations":[
@@ -73,15 +73,15 @@ class NYFedDatasets(unittest.TestCase):
             {"operationDate":self.A,"operationType":"Dollar Roll","totalAmtAcceptedPar":"70"}]}}
         r=fetch_dataset("NYFED_DATASET:AMBS",self.A,self.B,
              fetch=mocked(body,"ambs/all/results/summary/search.json"))
-        self.assertEqual(r.series["Outright Purchase"].points[0].value,Decimal(130))
-        self.assertEqual(r.series["All operation types"].points[0].value,Decimal(200))
+        self.assertEqual(r.series["Outright purchases"].points[0].value,Decimal(130))
+        self.assertEqual(r.series["Gross activity (accepted par)"].points[0].value,Decimal(200))
         self.assertEqual(len(r.detail),3)
     def test_am_bs_total_available_even_for_one_operation_type(self):
         body={"ambs":{"auctions":[
             {"operationDate":self.A,"operationType":"Dollar Roll","totalAmtAcceptedPar":"9"}]}}
         r=fetch_dataset("NYFED_DATASET:AMBS",self.A,self.B,
              fetch=mocked(body,"ambs/all/results/summary/search.json"))
-        self.assertEqual(r.series["All operation types"].points[0].value,Decimal(9))
+        self.assertEqual(r.series["Gross activity (accepted par)"].points[0].value,Decimal(9))
     def test_treasury_purchases_sales_only(self):
         body={"treasury":{"auctions":[
             {"operationDate":self.A,"operationDirection":"P","totalParAmtAccepted":"45"},
@@ -96,9 +96,9 @@ class NYFedDatasets(unittest.TestCase):
             {"operationDate":self.A,"currency":"USD","amount":"35"}]}}
         r=fetch_dataset("NYFED_DATASET:FXS",self.A,self.B,
              fetch=mocked(body,"fxs/all/search.json"))
-        self.assertEqual(set(r.series),{"EUR","USD"})
+        self.assertEqual(set(r.series),{"Non-USD-denominated · EUR","USD-denominated · USD"})
         self.assertNotIn("Total",r.series)
-        self.assertEqual(r.units["EUR"],"EUR")
+        self.assertEqual(r.units["Non-USD-denominated · EUR"],"EUR")
     def test_rates_have_percentage_and_bar_volume(self):
         body={"refRates":[
             {"effectiveDate":self.A,"type":"SOFR","percentRate":"3.7","volumeInBillions":"2940"},
@@ -116,7 +116,7 @@ class NYFedDatasets(unittest.TestCase):
         report=fetch_dataset("NYFED_DATASET:AMBS",self.A,self.B,
               fetch=mocked(data,"ambs/all/results/summary/search.json"))
         self.assertEqual(len(report.detail),2)
-        self.assertEqual(report.series["Purchase"].points[0].value,Decimal(100))
+        self.assertEqual(report.series["Outright purchases"].points[0].value,Decimal(100))
         self.assertTrue(any("excluded" in warning for warning in report.warnings))
     def test_historical_ambs_records_without_amounts_preserved_not_zeroed(self):
         body={"ambs":{"operations":[
@@ -143,9 +143,40 @@ class NYFedDatasets(unittest.TestCase):
         self.assertEqual(len(report.detail),1)
         self.assertEqual(report.daily,())
 
-    def test_missing_measurement_rejected_not_zero(self):
+    def test_missing_measurement_does_not_create_zero(self):
         bad={"treasury":{"auctions":[{"operationDate":self.A,"operationDirection":"P"}]}}
-        with self.assertRaisesRegex(ValueError,"Missing"):
-            fetch_dataset("NYFED_DATASET:TSY",self.A,self.B,
-                          fetch=mocked(bad,"tsy/all/results/summary/search.json"))
+        result=fetch_dataset("NYFED_DATASET:TSY",self.A,self.B,
+                             fetch=mocked(bad,"tsy/all/results/summary/search.json"))
+        self.assertFalse(result.series)
+        self.assertEqual(len(result.detail),1)
+        self.assertEqual(result.daily,())
+    def test_mbs_strict_par_and_net_direction(self):
+        body={"ambs":{"operations":[
+            {"operationDate":self.A,"operationType":"Outright Purchase",
+             "totalAmtAcceptedPar":"100"},
+            {"operationDate":self.A,"operationType":"Outright Sale",
+             "totalAmtAcceptedPar":"30"},
+            {"operationDate":self.A,"operationType":"Dollar Roll",
+             "totalAmtAcceptedPar":"15"},
+            {"operationDate":self.A,"operationType":"Coupon Swap",
+             "totalAmtAcceptedPar":"5"},
+            {"operationDate":self.A,"operationType":"Outright Purchase",
+             "totalAmtAccepted":"300"}]}}
+        result=fetch_dataset("NYFED_DATASET:AMBS",self.A,self.B,
+             fetch=mocked(body,"ambs/all/results/summary/search.json"))
+        self.assertEqual(result.series["Net outright purchases"].points[0].value,Decimal(70))
+        self.assertEqual(result.series["Gross activity (accepted par)"].points[0].value,Decimal(150))
+        self.assertEqual(result.series["Coupon swaps"].points[0].value,Decimal(5))
+        self.assertEqual(result.series["Dollar rolls"].points[0].value,Decimal(15))
+        self.assertEqual(len(result.detail),5)
+        self.assertTrue(any("excluded" in text for text in result.warnings))
+    def test_treasury_net_includes_zero_not_double_counted(self):
+        body={"treasury":{"auctions":[
+            {"operationDate":self.A,"operationDirection":"P","totalParAmtAccepted":"45",
+             "maturityRangeStart":"2028-01-01","maturityRangeEnd":"2030-01-01"},
+            {"operationDate":self.A,"operationDirection":"S","totalParAmtAccepted":"10",
+             "maturityRangeStart":"2028-01-01","maturityRangeEnd":"2030-01-01"}]}}
+        result=fetch_dataset("NYFED_DATASET:TSY",self.A,self.B,
+             fetch=mocked(body,"tsy/all/results/summary/search.json"))
+        self.assertEqual(result.series["Net purchases"].points[0].value,Decimal(35))
 if __name__=="__main__":unittest.main()

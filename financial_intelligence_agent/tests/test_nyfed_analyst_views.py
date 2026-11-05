@@ -111,23 +111,26 @@ class AnalystViewsTests(unittest.TestCase):
 
     def test_swap_dimensions_do_not_combine_currencies(self):
         rows=[
-            {"currency":"USD","amount":"20","centralBank":"ECB"},
-            {"currency":"EUR","amount":"50","centralBank":"ECB"},
-            {"currency":"EUR","amount":"30","centralBank":"ECB"}]
+            {"currency":"USD","amount":"20","centralBank":"ECB",
+             "operationType":"U.S. Dollar Liquidity Swap"},
+            {"currency":"EUR","amount":"50","centralBank":"ECB",
+             "operationType":"Non-U.S. Dollar Liquidity Swap"},
+            {"currency":"EUR","amount":"30","centralBank":"ECB",
+             "operationType":"Non-U.S. Dollar Liquidity Swap"}]
         groups=swap_dimensions(rows)
         self.assertEqual(len(groups),2)
         self.assertEqual({(r["Facility"],r["Currency"]):r[
             "Reported transaction amount (native currency)"] for r in groups},
-            {("USD-denominated","USD"):"20",
-             ("Non-USD-denominated","EUR"):"80"})
+            {("U.S. dollar liquidity swap","USD"):"20",
+             ("Non-U.S. dollar liquidity swap","EUR"):"80"})
 
     def test_swap_contract_stock_is_currency_and_counterparty_separated(self):
         start,end=date(2026,10,1),date(2026,10,5)
         records=[
-            {"operationType":"USD","currency":"USD","amount":"10",
+            {"operationType":"U.S. Dollar Liquidity Swap","currency":"USD","amount":"10",
              "counterparty":"ECB","settlementDate":"2026-10-01",
              "maturityDate":"2026-10-03"},
-            {"operationType":"Non-USD","currency":"JPY","amount":"20",
+            {"operationType":"Non-U.S. Dollar Liquidity Swap","currency":"JPY","amount":"20",
              "counterparty":"BoJ","settlementDate":"2026-10-01",
              "maturityDate":"2026-10-02"}]
         stock,note=swap_contract_outstanding(records,start,end)

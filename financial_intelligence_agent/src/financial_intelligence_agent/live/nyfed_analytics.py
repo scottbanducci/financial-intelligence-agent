@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Mapping
@@ -199,3 +200,38 @@ def swap_dimensions(rows:list[dict]|tuple[dict,...])->list[dict]:
     return [{"Facility":facility,"Currency":currency,"Counterparty":counterparty,
              "Reported transaction amount (native currency)":str(amount)}
             for (facility,currency,counterparty),amount in sorted(values.items())]
+
+
+def with_board_iorb(result,iorb:Series):
+    """Add transparently sourced Board IORB values to rates and both tables.
+
+    NY Fed source rows remain intact; supplementary FRED observations carry
+    explicit provenance instead of being mislabeled as NY Fed API records.
+    """
+    if result.definition.mode!="rates":
+        raise ValueError("IORB overlay requires the reference rates dataset")
+    if iorb.unit!="percent" or iorb.source!="FRED":
+        raise ValueError("IORB must be a percent rate from FRED")
+    label="IORB (Board/FRED)"
+    added_daily=[{"observation_date":p.date.isoformat(),"series":"IORB",
+                  "rate_percent":str(p.value),"volume_billions":"",
+                  "source":"Board of Governors via FRED"}
+                 for p in iorb.points if p.value is not None]
+    added_detail=[{"publisher":"Board of Governors via FRED","type":"IORB",
+                   "effectiveDate":p.date.isoformat(),
+                   "percentRate":str(p.value),"source_series":"IORB",
+                   "source_url":"https://fred.stlouisfed.org/series/IORB"}
+                  for p in iorb.points if p.value is not None]
+    ny_detail=[{"publisher":"Federal Reserve Bank of New York",**row}
+               for row in result.detail]
+    ny_daily=[{"source":"Federal Reserve Bank of New York",**row}
+              for row in result.daily]
+    return replace(result,
+        series={**result.series,label:iorb},
+        units={**result.units,label:"percent"},
+        daily=tuple(sorted(ny_daily+added_daily,
+                 key=lambda row:(row["observation_date"],row["series"]))),
+        detail=tuple(ny_detail+added_detail),
+        warnings=tuple(result.warnings)+(
+            "IORB comes from the Board of Governors via FRED, not NY Fed Markets API.",
+            "NY Fed daily volumes are not populated for IORB.",))

@@ -554,6 +554,56 @@ def _load_nyfed():
     period_controls("nyfed_range",earliest=ny_first)
     _show_ny_chart(result)
     for note in result.warnings:st.caption(note)
+    from financial_intelligence_agent.live.nyfed_analytics import (
+        repo_contract_outstanding,treasury_maturity_breakdown,swap_dimensions)
+    mode=result.definition.mode
+    if mode=="repo":
+        st.markdown("#### Repo and reverse repo: observed outstanding positions")
+        positions,qualification=repo_contract_outstanding(result.detail,start,end)
+        st.caption(qualification)
+        if positions:
+            from financial_intelligence_agent.live.nyfed_chart_views import nyfed_figure
+            st.plotly_chart(nyfed_figure(
+                positions,title="Observed repo positions (partial contract coverage)",
+                mode="repo",stock=True),use_container_width=True,theme=None,
+                key="ny_repo_positions_"+choice["id"])
+        else:
+            st.info("An outstanding-balance chart cannot be inferred from these "
+                    "accepted-volume records alone. A position requires settlement "
+                    "and maturity dates or an independent outstanding-stock source.")
+        st.caption("Accepted repo and reverse repo transaction amounts are shown "
+                   "in the chart above. Do not infer net daily reserve changes "
+                   "from accepted amounts without cash settlement and maturity.")
+    elif mode=="treasury":
+        st.markdown("#### Treasury maturity distribution")
+        maturity_rows=treasury_maturity_breakdown(result.detail)
+        if maturity_rows:
+            st.dataframe(pd.DataFrame(maturity_rows),
+                         use_container_width=True,hide_index=True)
+            st.caption("Maturity buckets are the publisher's reported ranges. "
+                       "Values are accepted par by operation date, not actual "
+                       "settled portfolio holdings.")
+        else:
+            st.info("No maturity-range fields were reported for these operations.")
+    elif mode=="swaps":
+        st.markdown("#### Currency, facility and counterparty dimensions")
+        groups=swap_dimensions(result.detail)
+        if groups:
+            st.dataframe(pd.DataFrame(groups),
+                         use_container_width=True,hide_index=True)
+        st.caption("These are reported transaction flows in native currencies. "
+                   "USD and non-USD facilities are not summed or FX-converted. "
+                   "Outstanding swap balances require a separate stock measure; "
+                   "they cannot be inferred by summing transaction volumes.")
+    elif mode=="rates":
+        st.caption("Rate aggregation: D shows reported rates; W/M/Y use the "
+                   "arithmetic mean of observed daily percentages. Transaction "
+                   "volume aggregation sums reported daily USD-billions; "
+                   "no missing dates are filled. IORB is Board/FRED data.")
+    else:
+        st.caption("D/W/M/Y aggregate accepted transaction amounts by calendar "
+                   "day, ISO week (Monday start), month or year. No missing "
+                   "operation dates are fabricated.")
     st.subheader("Daily chart observations")
     daily=pd.DataFrame(result.daily)
     st.dataframe(daily,use_container_width=True,hide_index=True,height=260)

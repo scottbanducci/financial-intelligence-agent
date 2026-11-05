@@ -210,7 +210,7 @@ def swap_contract_outstanding(
         counterparty=next((str(row[k]).strip() for k in (
             "counterparty","centralBank","foreignCentralBank","counterpartyBank")
             if row.get(k)),"Unspecified counterparty")
-        label="Observed swap outstanding · "+currency+" · "+counterparty
+        label="Observed swap outstanding · "+swap_facility(row)+" · "+currency+" · "+counterparty
         metadata[label]=currency
         current,last=max(start,a),min(end,b-timedelta(days=1))
         while current<=last:
@@ -233,6 +233,19 @@ def swap_contract_outstanding(
     return stock,note
 
 
+def swap_facility(row:dict)->str:
+    """Prefer NY Fed's published operationType over inferred currency."""
+    typ=str(row.get("operationType","")).strip().casefold()
+    if "non-u.s. dollar liquidity swap" in typ or "non-us dollar liquidity swap" in typ:
+        return "Non-U.S. dollar liquidity swap"
+    if "u.s. dollar liquidity swap" in typ or "us dollar liquidity swap" in typ:
+        return "U.S. dollar liquidity swap"
+    currency=str(row.get("currency","")).strip().upper()
+    # Legacy rows sometimes omit operationType; label fallback as inferred.
+    return ("Inferred USD-denominated" if currency=="USD"
+            else "Inferred non-USD-denominated")
+
+
 def swap_dimensions(rows:list[dict]|tuple[dict,...])->list[dict]:
     """Show distinct facility/currency/counterparty flows without FX conversion."""
     values:dict[tuple[str,str,str],Decimal]=defaultdict(Decimal)
@@ -242,7 +255,7 @@ def swap_dimensions(rows:list[dict]|tuple[dict,...])->list[dict]:
             "amount","totalAmtAccepted","totalAmount","amountAccepted","usdAmount")
             if k in row and row[k] not in (None,"")),None)
         if not currency or amount is None:continue
-        facility="USD-denominated" if currency=="USD" else "Non-USD-denominated"
+        facility=swap_facility(row)
         counterparty=next((str(row[k]).strip() for k in (
             "counterparty","centralBank","foreignCentralBank","counterpartyBank")
             if row.get(k)), "Not reported")

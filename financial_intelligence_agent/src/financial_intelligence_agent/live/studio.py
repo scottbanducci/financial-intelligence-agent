@@ -257,10 +257,11 @@ def _load_fred():
         st.session_state["fred_range_start"]=pending[1]
         st.session_state["fred_range_end"]=pending[2]
         st.session_state["fred_range_preset"]="ALL"
-    has_loaded=(st.session_state.get("fred_last_result")==chosen["id"]
-                and chosen["id"] in _state())
+    # Date inputs are always available, even for not-yet-fetched series
+    # and historically empty windows. Chart period buttons remain conditional
+    # on a visible plotted series.
     start,end=window_controls("fred_range",earliest=earliest,
-                              show_controls=has_loaded)
+                              show_controls=True)
     if st.button("Load FRED observations",type="primary",key="fred_load_observations"):
         try:
             with st.spinner("Loading FRED data; using the private server API key"):

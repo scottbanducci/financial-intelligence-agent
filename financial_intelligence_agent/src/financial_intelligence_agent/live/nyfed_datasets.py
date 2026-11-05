@@ -279,7 +279,7 @@ def fetch_dataset(dataset_id:str,start:str,end:str,*,
             elif d.mode=="operations":
                 raw_type=str(row.get("operationType","")).strip()
                 if not raw_type:raise ValueError("AMBS operationType missing")
-                group=ambs_category(raw_type)
+                group=ambs_category(raw_type,str(row.get("operationDirection","")))
                 # Agency MBS RESULTS/SUMMARY reports accepted PAR. Other
                 # monetary fields are not interchangeable measurements.
                 amount=_field(row,("totalAmtAcceptedPar",))

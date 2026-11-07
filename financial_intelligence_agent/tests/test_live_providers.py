@@ -48,6 +48,21 @@ class ProviderTests(unittest.TestCase):
         out=dealer("PDPOSGST-TOT","2026-10-01","2026-10-08",fetch=data,
                    authorized_ids={"PDPOSGST-TOT"})
         self.assertEqual(out.series.points[-1].value,12)
+    def test_primary_dealer_catalog_preserves_long_description_and_code(self):
+        full_title=("ASSET-BACKED SECURITIES OTHER FINANCING ACTIVITY "
+                    "SECURITIES BORROWED - DEALER FINANCING "
+                    "OVERNIGHT AND CONTINUING. "
+                    + "DETAILED PUBLISHER DESCRIPTION " * 10)
+        self.assertGreater(len(full_title),200)
+        rows=[{"keyid":"PDLONG001","description":full_title},
+              {"keyid":"PDLONG001","description":"Older duplicate title"}]
+        items=dealer_catalog(
+            fetch=lambda *a,**kw:{"pd":{"timeseries":rows}})
+        self.assertEqual(len(items),1)
+        self.assertEqual(items[0].label,full_title)
+        self.assertEqual(items[0].id,"NYFED_PD:PDLONG001")
+        self.assertEqual(items[0].unit,"USD millions")
+
     def test_fail_closed_on_unknown_dealer_layout(self):
         with self.assertRaisesRegex(ValueError,"structure changed"):
             dealer("PDPOSGST-TOT","2026-10-01","2026-10-08",

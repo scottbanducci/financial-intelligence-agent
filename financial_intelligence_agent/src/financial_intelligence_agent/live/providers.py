@@ -230,7 +230,7 @@ def dealer_catalog(*,fetch:Callable[...,dict]|None=None)->list[Descriptor]:
         if not KEY.fullmatch(key):continue
         # Descriptions can differ across source's series breaks.
         if key not in found:
-            found[key]=Descriptor("NYFED_PD:"+key,item.get("description",key)[:200],
+            found[key]=Descriptor("NYFED_PD:"+key,str(item.get("description") or key),
                                   "NYFED_PD","USD millions","weekly","Primary dealer statistics",
                                   NY_BASE+"/pd/get/"+key+".json","as_of")
     return list(found.values())

@@ -205,6 +205,34 @@ class CatalogIndexTests(unittest.TestCase):
              max_requests=5,sleep=lambda x:None)
         self.assertNotIn("fred_complete",result["state"])
         self.assertNotIn("secret",result["state"]["fred_error"])
+    def test_all_primary_dealer_series_are_visible_and_searchable(self):
+        from financial_intelligence_agent.live.catalog_index import warm_ny
+        # More than the old 150-row limit; test title words and raw keyids.
+        long_title=("ASSET-BACKED SECURITIES OTHER FINANCING ACTIVITY "
+                    "SECURITIES BORROWED - DEALER FINANCING "
+                    "OVERNIGHT AND CONTINUING " + "DETAIL " * 28)
+        self.assertGreater(len(long_title),200)
+        descriptors=[
+            Descriptor(f"NYFED_PD:PDTEST{i:04d}",
+                       long_title if i==1599 else f"Primary Dealer series {i:04d}",
+                       "NYFED_PD","USD millions","weekly","Primary dealer statistics",
+                       f"https://markets.newyorkfed.org/api/pd/get/PDTEST{i:04d}.json")
+            for i in range(1600)]
+        warm_ny(self.db,dealers=lambda:descriptors)
+        results=search(self.db,"",provider="NYFED_PD")
+        self.assertEqual(len(results),1600)
+        self.assertEqual(results[-1]["provider"],"NYFED_PD")
+        by_words=search(self.db,"securities borrowed continuing",
+                        provider="NYFED_PD")
+        self.assertEqual(len(by_words),1)
+        self.assertEqual(by_words[0]["label"],long_title)
+        by_code=search(self.db,"pdtest1599",provider="NYFED_PD")
+        self.assertEqual(len(by_code),1)
+        self.assertEqual(by_code[0]["id"],"NYFED_PD:PDTEST1599")
+        by_full_code=search(self.db,"nyfed_pd:pdtest1599",provider="NYFED_PD")
+        self.assertEqual(len(by_full_code),1)
+        self.assertEqual(by_full_code[0]["label"],long_title)
+
     def test_ny_dealer_series_index_not_endpoint(self):
         def dealers():
             return [Descriptor("NYFED_PD:PDPOSMBS-TOT","Total - mortgage backed","NYFED_PD",

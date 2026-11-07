@@ -396,8 +396,11 @@ def _load_nyfed():
         report=catalog_status(db)
         # Search each publisher namespace independently. Otherwise the
         # first 250 alphabetical FRED records could hide every NY Fed hit.
-        matches=(catalog_search(db,query,provider="NYFED_DATASET",limit=100)
-                 +catalog_search(db,query,provider="NYFED_PD",limit=150))
+        # Return the complete set of matching datasets and Primary Dealer
+        # keyids. Streamlit virtualizes listbox options in the browser; an
+        # arbitrary limit would conceal legitimate published series.
+        matches=(catalog_search(db,query,provider="NYFED_DATASET")
+                 +catalog_search(db,query,provider="NYFED_PD"))
     st.caption(f"{report['counts'].get('NYFED_PD',0):,} primary-dealer time series indexed • "+
                f"{report['counts'].get('NYFED_DATASET',0):,} structured data products")
     if report["state"].get("ny_dealers_error"):
@@ -405,9 +408,18 @@ def _load_nyfed():
     if not matches:
         st.info("No matching data product. Check spelling or wait for primary-dealer metadata to finish.")
         return
+    def nyfed_option_label(item:dict)->str:
+        if item["provider"]=="NYFED_PD":
+            return f'{item["label"]} [{item["id"].removeprefix("NYFED_PD:")}]'
+        return item["label"]
+    st.caption(f"{len(matches):,} matching datasets and series · All results displayed")
     choice=st.selectbox("Dataset",matches,
-        format_func=lambda x:x["label"],
+        format_func=nyfed_option_label,
         key="nyfed_selected_dataset")
+    # The complete selected description and keyid are shown as wrapping text,
+    # even when the native search input is narrower than the publisher label.
+    if choice["provider"]=="NYFED_PD":
+        st.caption("Selected Primary Dealer series: "+nyfed_option_label(choice))
     # ALL uses the supported publisher-history horizon. Older NY Fed
     # records can be sourced separately where published by the issuer.
     ny_first=date(1986,1,1) if choice["provider"]=="NYFED_PD" else date(2000,1,1)

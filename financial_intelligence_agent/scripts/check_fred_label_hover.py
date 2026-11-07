@@ -22,6 +22,7 @@ from financial_intelligence_agent.live.providers import Descriptor
 PORT=8597
 TEST_NAME="REALLYLONG Securities and Federal Reserve Economic Time Series Metadata "*12
 TEST_ID="FRED:LONG_SERIES"
+TEST_PD_LABEL="REALLYLONG Primary Dealer Statistics net financing and positions "*12
 
 def prepare_seed():
     db=get_connection()
@@ -32,7 +33,7 @@ def prepare_seed():
            "Test","https://fred.stlouisfed.org/series/LONG_SERIES",
            "FRED_realtime_vintage"))
         put_entry(db,Descriptor(
-           "NYFED_PD:LONG_PD","REALLYLONG Primary Dealer Statistics net financing and positions "*12,
+           "NYFED_PD:LONG_PD",TEST_PD_LABEL,
            "NYFED_PD","Millions of USD","weekly","Primary Dealer Statistics",
            "https://markets.newyorkfed.org/api/pd/get/LONG_PD.json"))
         db.commit()
@@ -62,7 +63,7 @@ def main():
                 page=browser.new_page(viewport={"width":1240,"height":900})
                 page.goto(f"http://127.0.0.1:{PORT}",wait_until="domcontentloaded")
                 page.get_by_role("tab",name="FRED",exact=True).click(timeout=30000)
-                search=page.get_by_placeholder("e.g. H.8, commercial bank credit, SOFR")
+                search=page.get_by_placeholder("e.g. reserve total weekly, millions USD, SOFR")
                 search.fill("LONG_SERIES")
                 # Streamlit commits text_input only on Enter/blur. Wait for
                 # that rerun to complete BEFORE opening the transient dropdown.
@@ -139,6 +140,13 @@ def main():
                 nyoption=page.locator('[role="listbox"] [role="option"]').filter(
                     has_text="REALLYLONG").first
                 nyoption.wait_for(timeout=15000)
+                option_text=nyoption.inner_text()
+                assert TEST_PD_LABEL in option_text,(
+                    "Long Primary Dealer description was truncated")
+                assert option_text.endswith("[LONG_PD]"),(
+                    "Primary Dealer keyid missing from displayed option")
+                page.get_by_text("Selected Primary Dealer series: "+TEST_PD_LABEL+
+                                 " [LONG_PD]",exact=True).wait_for(timeout=12000)
                 nylab=nyoption.locator("[data-item-hl]")
                 nyoption.hover()
                 page.wait_for_timeout(2500)
